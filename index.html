@@ -1,8 +1,77 @@
+<!DOCTYPE html>
 <html>
-  <head>
-    <title>Kenneth Gould Games</title>
-  </head>
-  <body>
-    <h1>Welcome to my website!!</h1>
-  </body>
+    <head>
+        <title>Kenneth Gould Games</title>
+        <style>
+            body{
+                background: rgb(16, 16, 40);
+                color: white;
+                padding: 0px;
+                margin: 0px;
+            }
+            header{
+                background: black;
+                margin: 0px 0px 10px 0px;
+                padding: 20px;
+            }
+            section{
+                background: blue;
+                margin: 10px 5%;
+                padding: 10px;
+                display: flex;
+                flex-direction: row;
+            }
+            footer{
+                background: gray;
+                height: 100px;
+                padding: 5px;
+            }
+            div{
+                background: red;
+                margin: auto;
+                width: 200px;
+                height: 50px;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                flex-direction: row;
+            }
+            li{
+                display: inline;
+                font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
+                margin-right: 2%;
+                margin-left: 5px;
+                font-size: 18px;
+            }
+            ul{
+                margin: 0;
+                padding: 0;
+                list-style-type: none;
+            }
+        </style>
+    </head>
+    <!-- comment! -->
+     <!-- a div just divides the page into horizontal sections. 
+        There are different names for div that do the same thing, namely:
+        header, nav, section, footer-->
+    <body>
+        <header>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="projects.html">Projects</a></li>
+                    <li><a href="about.html">About</a></li>
+                    <li><a href="journal.html">Journal</a></li>
+                </ul>
+            </nav>
+        </header>
+        <section>triple section
+            <div>inside triple: a</div>
+            <div>inside triple: b</div>
+            <div>inside triple: c</div>
+        </section>
+        <section>lower section</section>
+        <footer>this is the footer check it out!</footer>
+        <div>evil div!</div>
+        <div>evil div!</div>
+        <div>evil div!</div>
+    </body>
 </html>
