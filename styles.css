@@ -11,6 +11,7 @@ nav.normal{
     background: black;
     padding: 15px;
     position: sticky;
+    top: 0;
 }
 nav.normal ul{
     list-style-type: none;
@@ -27,9 +28,23 @@ nav.normal ul li{
     margin-right: 5%;
     padding: 5px;
 }
+
+nav.normal ul li a {
+    text-decoration: none;
+    color: inherit;
+}
+
 div.lilly{
     color: pink;
     font-size: 500%;
     display: flex;
     justify-content: center;
+}
+
+section{
+    padding: 40px;
+}
+
+.container{
+    max-width: 900px;
 }
