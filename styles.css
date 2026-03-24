@@ -33,7 +33,7 @@ nav ul li {
 nav ul li a{
     text-decoration: none;
     color: #f5f3f5;
-    font-size: 1.2rem;
+    font-size: 1.2em;
 }
 
 nav ul li a:hover {
@@ -44,7 +44,7 @@ nav ul li a:hover {
 
 #topname{
     font-weight: bold;
-    font-size: 1.5rem;
+    font-size: 1.5em;
     text-shadow: 1px 1px 2px black;
     margin-left: 15px;
 }
@@ -63,7 +63,7 @@ html{
 }
 
 .box h1{
-    font-size: 2rem;
+    font-size: 2em;
     background-color: #3B8FF399;
     margin: 0px;
     border-radius: 10px;
@@ -73,7 +73,7 @@ html{
 .box p {
     margin-bottom: 15px;
     opacity: 0.9;
-    font-size: 1rem;
+    font-size: 1em;
 }
 
 .box{
@@ -86,7 +86,7 @@ html{
 
 #welcome{
     text-align: center;
-    font-size: clamp(1rem, 5vw, 3rem);
+    font-size: clamp(1em, 5vw, 3em);
     background-color: #376996;
     border-radius:5px;
     margin: 10px 10px;
@@ -151,4 +151,14 @@ html{
 
 #projects{
     scroll-margin-top: 50px;
+}
+
+#projects p{
+    margin: 10px 10px;
+}
+
+@media (max-width: 600px) {
+    body{
+        font-size: 1.2rem;
+    }
 }
