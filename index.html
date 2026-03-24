@@ -4,18 +4,115 @@
         <title>kennethgould.dev</title>
         <link rel="stylesheet" href="styles.css">
     </head>
-    <!-- comment! -->
-     <!-- a div just divides the page into horizontal sections. 
-        There are different names for div that do the same thing, namely:
-        header, nav, section, footer-->
     <body>
-        <nav class="normal">
+        <nav>
+            <div id="topname">
+                Kenneth Gould
+            </div>
             <ul>
                 <li><a href="#">Home</a></li>
-                <li><a href="#projects">Projects</a></li>
                 <li><a href="#about">About</a></li>
-                <li><a href="#journal">Journal</a></li>
+                <li><a href="#projects">Projects</a></li>
             </ul>
         </nav>
+
+        <section id="welcome">
+            Welcome!
+        </section>
+
+        <section class="box" id="workinprogress">
+            <h1>This website is a work in progress right now!</h1>
+            <p>This is <b>not</b> the final result!</p>
+            <p>Be sure to stop by and visit again later!</p>
+        </section>
+
+        <section class="box" id="about">
+            <h1>About Me</h1>
+            <p>
+                Hello! My name is Kenneth Gould.
+            </p>
+            <p>
+                I am a Programmer, Game developer, and Musician!
+            </p>
+            <p>
+                Some of my other big interests are Psychology, Cosmology, Philosophy, Epistemology, and Teaching others!
+            </p>
+            <p>
+                Below you can see some of the projects that I have made over my life so far. <br>
+                Give em a shot! Sorry if some of the explanations don't make too much sense, I hope the projects still look pretty cool though!
+            </p>
+        </section>
+
+        <section class="box" id="projects">
+            <h1>Projects!!!</h1>
+            <p>These are some of my projects that i have worked on into a usable state.</p>
+            <p>Feel free to check them out, and mess around a bit!</p>
+
+            <div class="project-container">
+                <a href="https://whatsupbro3.itch.io/fluid-simulation" target="_black" class="project">
+                    <h2>Fluid Simulation</h2>
+                    <img src="images/fluidsim.png">
+                </a>
+                <p>
+                    This is a simple fluid simulation. In the future, I'll will remake it using a Compute Shader instead! (wish me luck with that!)
+                </p>
+            </div>
+
+            <div class="project-container">
+                <a href="https://whatsupbro3.itch.io/tetris-ai" target="_black" class="project">
+                    <h2>Tetris AI</h2>
+                    <img src="images/tetrisai.png">
+                    <p>First, I remade tetris as accurately as possible. 
+                        Then, I built a simple neural network. 
+                        Finally, I forced those artifically created minds to 
+                        fight eachother to the death.</p>
+                    </a>
+                <p>
+                    Turns out, utilizing the wonderful process of evolution to make AI better
+                    at classic video games works pretty well!
+                    The longer you have it running on your browser, the better the bots become!
+                    I do plan on returning to this project later, and making it even better.
+                </p>
+            </div>
+
+            <div class="project-container">
+                <a href="https://whatsupbro3.itch.io/flappy-bird-ai" target="_black" class="project">
+                    <h2>Flappy Bird AI</h2>
+                    <img src="images/flappybirdai.png">
+                </a>
+                <p>
+                    This is similar to the Tetris AI, but they fly through pipes instead!
+                    The longer you leave the simulation running, the better the birds get!
+                    In my opinion, it makes for a really nice wallpaper or screensaver.
+                    On the right side, you can see the "brain" of the best bird!
+                    All of the inputs the bird "sees" are how far the rays from the bird shoot.
+                    You can even see the bird's line of sights visually!
+                </p>
+            </div>
+
+            <div class="project-container">
+                <a href="https://whatsupbro3.itch.io/epic-tower-defense" target="_black" class="project">
+                    <h2>Simple Tower Defense</h2>
+                    <img src="images/towerdefense.png">
+                </a>
+                <p>
+                    This is a simple tower defense that I made for my Game Development class in high school. Pretty cool, and dynamic map generation!!
+                </p>
+            </div>
+
+            <div class="project-container">
+                <a href="https://whatsupbro3.itch.io/" target="_black" class="project">
+                    <h2>More projects on my Itch.io Page!</h2>
+                </a>
+                <p>
+                    Those are my most notable projects, but I have even more projects
+                    listed on my Itch.io page! Click the text above to see more!
+                </p>
+            </div>
+
+            
+
+        </section>
     </body>
+
 </html>
