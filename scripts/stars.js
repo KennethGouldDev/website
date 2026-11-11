@@ -50,8 +50,6 @@ background_canvas.height = window.innerHeight;
 // make a list of stars
 const stars = [];
 const stars_amount = 300;
-const star_min_size = 2;
-const star_max_size = 20;
 
 function lerpf(start, end, t){
     return start + (end - start) * t;
@@ -66,7 +64,10 @@ let since_star_added_time = 0;
 const add_star_every_min = 0.02;
 const add_star_every_max = 0.1;
 // changing this willl delay until stars are added
-let add_star_every = 0.1
+let add_star_every = 0
+
+const star_min_length = 5;
+const star_max_length = 30;
 
 
 requestAnimationFrame(animate)
@@ -89,14 +90,19 @@ function animate(timestamp){
             stars.push({
                 x: Math.random() * background_canvas.width,
                 y: Math.random() * background_canvas.height,
-                size: lerpf(star_min_size, star_max_size, Math.random()),
                 speed: Math.random() + 1,
                 direction: Math.random() * 3.14159 * 2,
-                color: Math.random() * 20 - 10,
+                color: Math.random() * 30 - 15,
                 time_added: time,
                 velocity_x: 0,
-                velocity_y: 0
+                velocity_y: 0,
+                thickness: 0, //set later
+                length: randf_range(star_min_length, star_max_length),
+                size: 0 //set later
             });
+            let change_star = stars.at(-1)
+            change_star.thickness = -(change_star.length - star_max_length)/4
+            change_star.size = star_max_length - change_star.length
         }
     }
 
@@ -192,15 +198,17 @@ function animate(timestamp){
         // draw the star
         star.color += (Math.random() - 0.5) * delta * 200
         ctx.fillStyle = "rgb(150,150," + (200 + star.color) + "," + star_alpha + ")"
-        ctx.fillRect(star.x - star.size/2,
-            star.y - star.size/2 + star.size/4 + star.size/8,
-            star.size,
-            star.size/4)
-        ctx.fillRect(star.x - star.size/2 + star.size/4 + star.size/8,
-            star.y - star.size/2,
-            star.size/4,
-            star.size)
+        // horizontal
+        ctx.fillRect(star.x - star.length/2,
+            star.y - star.thickness/2, 
+            star.length, 
+            star.thickness)
+        ctx.fillRect(star.x - star.thickness/2,
+            star.y - star.length/2, 
+            star.thickness, 
+            star.length)
     });
+
 
     // Basically, how this runs every frame, is this animate function gets called,
     // and at the end here this function `requestAnimationFrame` waits until
