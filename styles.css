@@ -15,10 +15,7 @@ body{
 }
 
 #nameplate{
-    height: 80;
-
-    margin-left: 5%;
-    margin-right: 5%;
+    height: 80px;
 
     padding: 10px, 20px;
     min-width: 370px;
@@ -39,7 +36,7 @@ body{
     border-radius: 2px;
 
     opacity: 0;
-    animation: nameplateSlide 1.5s ease-out 1s forwards
+    animation: nameplateSlide 1.5s cubic-bezier(0.22, 1, 0.36, 1) 1.3s forwards;
 }
 
 #nameplate h1{
@@ -102,17 +99,23 @@ body{
     max-width: 1200px;
     width:fit-content;
     margin: 10px auto;
+    /* Comment the below two lines to stop the delay of when it comes in*/
     opacity: 0;
     animation: fadeInLayout 0.7s ease-out 2s forwards;
 }
+/* make it one column if small width window */
+@media (max-width: 700px){
+    .layout{
+        grid-template-columns: 1fr;
+    }
+}
 
-.explore{
+.panel.explore{
     background-color: rgba(15, 15, 22, 0.8);
     border: 5px solid rgba(27, 42, 48, 0.6);
-    padding: 6px;
-    height: auto;
+
 }
-.explore h1{
+.panel.explore h1{
     text-align: center;
     font-family: "RubikIso";
     font-size: 3rem;
@@ -176,6 +179,32 @@ body{
     flex-direction: column;
     gap: 8px;
     margin-bottom: 6px;
+}
+
+.panel.status{
+    border: 6px dashed rgba(40, 64, 73, 0.6);
+    background-color: rgba(15, 15, 22, 0.95);
+}
+.panel.status h2{
+    text-align: center;
+    font-family:"GeistPixel";
+    font-size: 2.5rem;
+    margin: 10px;
+    color: rgb(255, 255, 255);
+
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    padding: 3px;
+    margin-bottom: 5px;
+    text-shadow: 0 1px 4px rgba(255, 255, 255, 0.466);
+}
+.panel.status h2:hover{
+    animation: wiggle 1s ease infinite;
+}
+.panel.status p{
+    text-align: center;
+    color: white;
+    font-family:"Jersey15";
+    font-size: 1.5rem;
 }
 
 .panel{
@@ -242,12 +271,12 @@ span.bigger{
 
 @keyframes nameplateSlide{
     from{
-        transform: translateY(-110px);
+        transform: translateY(-110px) scale(0.9);
         opacity: 0;
     }
 
     to {
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
         opacity: 1;
     }
 }
@@ -262,6 +291,14 @@ span.bigger{
         transform: translateY(0);
         opacity: 1;
     }
+}
+
+@keyframes wiggle{
+    0% {transform: rotate(0deg);}
+    25% {transform: rotate(-2deg);}
+    50% {transform: rotate(0deg);}
+    75% {transform: rotate(2deg);}
+    100% {transform: rotate(0deg);}
 }
 
 @font-face {
