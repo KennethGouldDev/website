@@ -15,11 +15,11 @@ body{
 }
 
 #nameplate{
-    position: fixed;
-    top: 20;
-    left: 20;
-    right: 20;
     height: 80;
+
+    margin-left: 5%;
+    margin-right: 5%;
+
     padding: 10px, 20px;
     min-width: 370px;
 
@@ -38,7 +38,8 @@ body{
     border-color: linear-gradient(90deg, rgb(255,255,255), rgb(255,255,0));
     border-radius: 2px;
 
-    animation: nameplateSlide 2.5s ease-out;
+    opacity: 0;
+    animation: nameplateSlide 1.5s ease-out 1s forwards
 }
 
 #nameplate h1{
@@ -100,9 +101,9 @@ body{
     
     max-width: 1200px;
     width:fit-content;
-    margin: 130px auto;
+    margin: 10px auto;
     opacity: 0;
-    animation: fadeInLayout 1s ease-out 2s forwards;
+    animation: fadeInLayout 0.7s ease-out 2s forwards;
 }
 
 .explore{
@@ -253,7 +254,7 @@ span.bigger{
 
 @keyframes fadeInLayout{
     from{
-        transform: translateY(20px);
+        transform: translateY(10px);
         opacity: 0;
     }
 
