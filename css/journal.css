@@ -1,0 +1,132 @@
+body{
+    background-color: black;
+    color: white;
+}
+
+/* custom background */
+#background{
+    position: fixed;
+    top: 0;
+    left: 0;
+
+    width: 100%;
+    height: 100%;
+
+    z-index: -1;
+}
+
+.bigtext{
+    margin: 80px 0px;
+    font-family:"RubikIso";
+    text-shadow: 0px 0px 10px white;
+    font-size: clamp(1.5rem, 5vw, 5rem);
+    width: 100% ;
+    text-align: center;
+    opacity: 0;
+    animation: bigTextReveal 5s cubic-bezier(0.22, 1, 0.36, 1) 0.5s both;
+}
+
+.home{
+    display: flex;
+    width: fit-content;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto;
+    opacity: 0;
+    animation: homeReveal 1.5s ease-out 5s forwards;
+}
+
+.journals{
+    align-items: center;
+    margin: auto;
+    padding: 0px 10px;
+    width: 90%;
+    max-width: 1200px;
+}
+
+.journal-entry{
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    margin: 20px;
+    padding: 10px;
+    opacity: 0;
+    pointer-events: none;
+}
+.journal-entry.clickable{
+    pointer-events: auto;
+}
+
+/* remove the arrow */
+.journal-header::-webkit-details-marker {
+    display:none;
+}
+.journal-header {
+    cursor: pointer;
+    list-style: none;
+    text-align: center;
+    padding: 15px;
+    font-size: clamp(1rem, 3vw, 2.5rem);
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border: 2px solid white;
+    user-select: none;
+
+}
+
+.journal-date{
+    font-family:"GeistPixel";
+    color: #888;
+    font-size: clamp(.8rem, 2vw, 2rem);
+}
+.journal-title{
+    font-family:"PixelifySans";
+}
+
+.journal-content{
+    /* this height stuff is so that we can animate it opening up in javascript */
+    height: 0;
+    overflow: hidden;
+    transition: height 0.4s ease;
+    text-align: center;
+    font-family:"Jersey15";
+    font-size:2rem;
+}
+.journal-content p{
+    margin: 0;
+    padding: 15px;
+}
+
+
+@keyframes bigTextReveal{
+    from{
+        opacity: 0;
+        transform: translateY(-50px) scale(0.95);
+    }
+
+    to{
+        opacity: 1;
+        transform: translateY(0px) scale(1);
+    }
+}
+
+@keyframes journalReveal{
+    from{
+        opacity: 0;
+        transform: translateY(25px);
+    }
+    to{
+        opacity: 1;
+        transform: translateY(0px);
+    }
+}
+
+@keyframes homeReveal{
+    from{
+        opacity: 0;
+    }
+
+    to{
+        opacity: 0.5;
+    }
+}

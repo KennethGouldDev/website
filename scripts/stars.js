@@ -33,6 +33,15 @@ document.addEventListener("mousedown", () =>{
 })
 document.addEventListener("mouseup", () =>{
     clicking = false
+    // make the stars around cursor explode out
+    stars.forEach(star =>{
+        let vector = {x: star.x - mouse.x, y: star.y - mouse.y}
+        let distance = Math.sqrt(vector.x * vector.x + vector.y * vector.y)
+        if (distance < 100){
+            star.velocity_x += vector.x * 3
+            star.velocity_y += vector.y * 3
+        }
+    })
 })
 
 // make background stars
@@ -58,7 +67,7 @@ function lerpf(start, end, t){
 let prev_time = 0;
 let prev_mouse = {x: 0, y: 0}
 // changing this changes the speed of the stars at the beginning
-let mouse_force = {x: 0, y: -30}
+let mouse_force = {x: 0, y: -50}
 
 let since_star_added_time = 0;
 const add_star_every_min = 0.02;

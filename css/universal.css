@@ -1,0 +1,71 @@
+@import url("fonts.css");
+
+::-webkit-scrollbar{
+    width: 10px;
+    background:transparent;
+}
+::-webkit-scrollbar-thumb{
+    background: rgba(45, 70, 65, 0.788);
+    border-radius: 2px;
+    margin: 2px;
+}
+
+.warning{
+    border: 2px solid rgba(168, 160, 160, 0.65);
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    padding: 10px;
+    background-color : rgba(188, 54, 54, 0.299);
+    align-items: center;
+    font-family: "GeistPixel";
+    font-size: 1.5rem;
+    animation: warningSlideIn 1s ease-out 1s forwards;
+    animation: warningSlideOut 2s ease-in 4s forwards;
+}
+
+.home{
+    text-decoration: none;
+    color: white;
+    font-family:"GeistPixel";
+    font-size: 1.5rem;
+    border: 2px solid white;
+    padding: 5px;
+    background: linear-gradient(
+        90deg,
+        rgba(18, 49, 70, 0.816),
+        rgba(5, 23, 50, 0.34)
+    );
+    transition: all ease 0.5s;
+    opacity: 0.5;
+}
+
+.home:hover{
+    font-size: 2rem;
+    opacity: 1;
+}
+
+
+@keyframes warningSlideOut{
+    from{
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    to{
+        transform: translateX(-500px);
+        opacity: 0;
+    }
+}
+
+@keyframes warningSlideIn{
+    from{
+        transform: translateX(-50px);
+        opacity: 0;
+    }
+
+    to{
+        transform: translateX(0px);
+        opacity: 1;
+    }
+}
