@@ -10,8 +10,10 @@
 
 
 
+<!-- thought -->
 
-
+2026-11-12
+gay lookin boi, so gay i can barely say it with a straight face lookin boi (eminem)
 
 
 <!-- thought -->
