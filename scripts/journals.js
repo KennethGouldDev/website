@@ -18,8 +18,16 @@ async function loadJournals(){
     // load each markdown file
     // cant do a normal arrow function here because we have to keep it async
     for (const file of files){
-        console.log("looping through journal entries")
+        console.log(`Trying to find journal ${file}`)
         const markdownResponse = await fetch(`../journal_entries/${file}`)
+
+        // error log if cant load a journal
+        if (!markdownResponse.ok){
+            console.error(
+                `Failed to load the file ${file}: HTTP ${markdownResponse.status}`
+            )
+        }
+
         const markdown = await markdownResponse.text()
 
         // extract the front matter (the little info at the top of journal entries)
