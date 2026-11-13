@@ -240,7 +240,16 @@ body{
     padding: 10px;
     border-style:dotted;
     border-color: rgba(128, 128, 128, 0.1);
+}
 
+.panel.todo h1{
+    font-size: 1.5rem;
+    text-decoration: underline;
+}
+.panel.todo ul{
+    color: white;
+    margin-left: 0px;
+    font-family: "PixelifySans";
 }
 
 .panel{

@@ -26,6 +26,7 @@ async function loadJournals(){
             console.error(
                 `Failed to load the file ${file}: HTTP ${markdownResponse.status}`
             )
+            continue
         }
 
         const markdown = await markdownResponse.text()
