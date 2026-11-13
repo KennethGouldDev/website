@@ -92,7 +92,12 @@ function animate(timestamp){
     // do physics process
     // some trickery to make sure it runs at a fixed timestep
     physics_accumulate += delta
-    if (physics_accumulate > physics_delta) {
+    while (physics_accumulate > physics_delta) {
+        if (physics_accumulate > physics_delta * 10){
+            // dont make it execute more than ten times in one frame
+            physics_accumulate = 0
+            break
+        }
         physics_accumulate -= physics_delta
         physics_process(physics_delta, time)
     }
