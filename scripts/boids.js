@@ -63,7 +63,7 @@ function animate(timestamp){
     // do physics process
     // some trickery to make sure it runs at a fixed timestep
     physics_accumulate += delta
-    while (physics_accumulate > physics_delta) {
+    if (physics_accumulate > physics_delta) {
         physics_accumulate -= physics_delta
         physics_process(physics_delta, time)
     }
@@ -226,7 +226,7 @@ function physics_process(delta, time){
         // make them steer away from the mouse
 
         let to_mouse = {x: mouse.x - boid.x, y: mouse.y - boid.y}
-        if (Math.hypot(to_mouse.x, to_mouse.y) < 200){
+        if (Math.hypot(to_mouse.x, to_mouse.y) < 150){
             // steer away from mouse
             let theta = Math.atan2(-to_mouse.y, -to_mouse.x)
             boid.angle -= angle_difference(theta, boid.angle) * delta * 2

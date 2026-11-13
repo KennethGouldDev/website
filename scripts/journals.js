@@ -8,7 +8,7 @@ import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/+esm";
 const journalContainer = document.querySelector(".journals")
 
 async function loadJournals(){
-
+    
     // what we have to do is get the list of journal entry paths from
     // journal_entries_list.json (make sure you update this file every time
     // you make a new journal entry}
@@ -18,6 +18,7 @@ async function loadJournals(){
     // load each markdown file
     // cant do a normal arrow function here because we have to keep it async
     for (const file of files){
+        console.log("looping through journal entries")
         const markdownResponse = await fetch(`../journal_entries/${file}`)
         const markdown = await markdownResponse.text()
 
@@ -81,6 +82,7 @@ async function loadJournals(){
         // avengers assemble!!
         entry.append(summary, journalContent)
         journalContainer.appendChild(entry)
+        console.log("end")
     }
 }
 
