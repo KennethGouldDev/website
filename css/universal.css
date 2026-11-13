@@ -28,7 +28,6 @@
     text-decoration: none;
     color: white;
     font-family:"GeistPixel";
-    font-size: 1.5rem;
     border: 2px solid white;
     padding: 5px;
     background: linear-gradient(
@@ -36,12 +35,12 @@
         rgba(18, 49, 70, 0.816),
         rgba(5, 23, 50, 0.34)
     );
-    transition: all ease 0.5s;
+    transition: transform ease 0.5s;
     opacity: 0.5;
 }
 
 .home:hover{
-    font-size: 2rem;
+    transform: scale(1.25);
     opacity: 1;
 }
 

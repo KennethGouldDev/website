@@ -1,3 +1,91 @@
+import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
+import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/+esm";
+// turn the journal entry markdown files into html and put them in
+// marked is a simple library that converts markdown into html
+// dompurify is just a safety measure to stop bad html or scripts being injected
+
+// get the journal container
+const journalContainer = document.querySelector(".journals")
+
+async function loadJournals(){
+
+    // what we have to do is get the list of journal entry paths from
+    // journal_entries_list.json (make sure you update this file every time
+    // you make a new journal entry}
+    const response = await fetch("../journal_entries/journal_entries_list.json")
+    const files = await response.json();
+
+    // load each markdown file
+    // cant do a normal arrow function here because we have to keep it async
+    for (const file of files){
+        const markdownResponse = await fetch(`../journal_entries/${file}`)
+        const markdown = await markdownResponse.text()
+
+        // extract the front matter (the little info at the top of journal entries)
+        // and the markdown content
+        // take a look at this jumbly mess..
+        // itll return a list where the first element is everything,
+        // the second is the metadata, and the third is the content.
+        // this is all funny regex
+        const match = markdown.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+
+        // check if theres a problem (no front matter)
+        if (!match){
+            console.warn(`bruh you forgot the front matter in ${file}`)
+            continue;
+        }
+
+        const metadata = match[1]
+        const content = match[2]
+
+        // get the title and the date
+        // this is also funny regex
+        const title = metadata.match(/^title:\s*(.+)$/m)?.[1] ?? "no title"
+        const date = metadata.match(/^date:\s*(.+)$/m)?.[1] ?? "no date"
+
+        // this is where dompurify and marked comes in,
+        // we are gonna actually convert this to html!
+        const html = DOMPurify.sanitize(marked.parse(content))
+
+        // make the journal entry
+        // basically make the elements with the right type and the right class
+        // and then make them say the proper things
+        const entry = document.createElement("div")
+        entry.className = "journal-entry"
+
+        // make the header
+        const summary = document.createElement("button")
+        summary.className = "journal-header"
+        summary.type = "button"
+
+        const dateElement = document.createElement("span")
+        dateElement.className = "journal-date"
+        dateElement.textContent = date
+
+        const titleElement = document.createElement("span")
+        titleElement.className = "journal-title"
+        titleElement.textContent = title
+
+        summary.append(dateElement, titleElement)
+
+        // same with the content of the entry
+        const journalContent = document.createElement("div")
+        journalContent.className = "journal-content"
+
+        // this is where we actually plug in the converted html
+        const innerContent = document.createElement("div")
+        innerContent.innerHTML = html;
+        // and put it into the journal content
+        journalContent.appendChild(innerContent)
+
+        // avengers assemble!!
+        entry.append(summary, journalContent)
+        journalContainer.appendChild(entry)
+    }
+}
+
+await loadJournals()
+
 // this is to open and close the journal entries
 
 // get every journal entry
@@ -8,53 +96,70 @@ journals.forEach(journal =>{
     const header = journal.querySelector(".journal-header");
     const content = journal.querySelector(".journal-content");
 
-    // some trickery happens if we click it too fast,
-    // so lets make it not do its stuff if it is animating.
+    let is_open = false;
     let is_animating = false
 
     // listen for if the user clicks the journal entry
-    header.addEventListener("click", event => {
-        // first of all, the browser will try to do its normal shenanigans when we click the thing
-        // but we want to do our own shenanigans. so lets disable that
-        event.preventDefault();
+    header.addEventListener("click", async () => {
 
         // ignore clicks while the animations are running
-        if (is_animating == true){
-            return
-        }
+        if (is_animating) return
 
         is_animating = true
 
-        if (journal.open == false){
-            // if its closed, then open it
-            journal.open = true;
+        if (is_open == false){
+            // open it
 
-            // set the height of the content to it's scroll height (the height it wants to be at)
-            content.style.height = content.scrollHeight + "px";
+            content.style.height = "0px";
+            content.style.display = "block";
 
-            // when the animation ends, set its height to auto instead
-            content.addEventListener("transitionend", function handler(){
-                content.style.height = "auto";
-                content.removeEventListener("transitionend", handler)
-                is_animating = false
+            // force the browser to calculate the height
+            content.offsetHeight
+
+            // animate it to the full height (wait a frame first)
+            requestAnimationFrame(() => {
+                content.style.height = content.scrollHeight + "px"
             })
-        } else {
-            // so its open, now close it
+
+            // wait for the height transition
+            const finishOpening = event => {
+                if (event.propertyName !== "height") return
+                
+                content.removeEventListener("transitionend", finishOpening)
+
+                content.style.height = "auto"
+
+                is_open = true
+                is_animating = false
+            }
+
+            content.addEventListener("transitionend", finishOpening)
+        }
+        else{
+            // close it
+
+            // get the current height
+            content.style.height = content.scrollHeight + "px"
             
-            // set the height to the actual thing
-            content.style.height = content.scrollHeight + "px";
-            // we cant immediately set it to 0px or else it might act weird,
-            // so we wait a frame and then set it to 0.
+            // force update
+            content.offsetHeight
+
+            // animate it to nothing
             requestAnimationFrame(() => {
                 content.style.height = "0px"
             })
-            
-            // when the animation ends, say its now closed
-            content.addEventListener("transitionend", function handler(){
-                journal.open = false;
-                content.removeEventListener("transitionend", handler)
+
+            const finishClosing = event => {
+                if (event.propertyName !== "height") return;
+
+                content.removeEventListener("transitionend", finishClosing);
+
+                is_open = false
                 is_animating = false
-            })
+            }
+
+            content.addEventListener("transitionend", finishClosing)
+
         }
     })
 })
@@ -68,7 +173,7 @@ let staggerDelayMultiplier = 0.92
 journals.forEach((journal, index) => {
     // settimeout very simply executes a function after a set amount of time
     setTimeout(() => {
-        journal.style.animation = "journalReveal 1s ease forwards"
+        journal.style.animation = "journalReveal 2s ease-out forwards"
         // make it clickable
         journal.classList.add("clickable")
     },
