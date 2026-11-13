@@ -115,13 +115,27 @@ let boid_spawn_interval = 0.3
 let boid_stopwatch = -1
 
 function physics_process(delta, time){
+
+    // change boids amount based on window width
+    boids_amount = Math.round(Math.min(
+        300, 
+        50 + window.innerWidth/5
+    ))
+    console.log(boids_amount)
+    console.log(boids.length)
+
+    if (boids.length > boids_amount){
+        // more boids than there should be
+        boids.pop()
+    }
+
     // spawning 
     if (boids.length < boids_amount){
         boid_stopwatch += delta
         while (boid_stopwatch > boid_spawn_interval){
             boid_stopwatch -= boid_spawn_interval
             boid_spawn_interval *= .9
-            boid_spawn_interval = Math.max(boid_spawn_interval, 0.04)
+            boid_spawn_interval = Math.max(boid_spawn_interval, 0.03)
 
             boids.push({
                 x: randf_range(0,background_canvas.width),
