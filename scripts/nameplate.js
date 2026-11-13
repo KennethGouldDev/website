@@ -9,3 +9,5 @@ nameplate_text.addEventListener("click", function(){
     clicks++
     clicks_display.textContent = "clicks: " + clicks
 })
+
+// set opacity based on last time clicked

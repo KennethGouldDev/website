@@ -21,7 +21,7 @@ body{
     height: 80px;
 
     padding: 10px, 20px;
-    min-width: 370px;
+    min-width: 450px;
 
     background: linear-gradient(70deg,
     rgba(0, 0, 0, .2) 0%, 
@@ -46,6 +46,7 @@ body{
     font-size: 3rem;
     font-family: "GeistPixel";
     text-shadow: 0 0 4px rgba(255, 255, 255, .7);
+    text-wrap: nowrap;
 
     /* put gradient behind text, make text color invisible */
     background: linear-gradient(
@@ -85,6 +86,10 @@ body{
     position: absolute;
     bottom: 10px;
     left: 15px;
+    background-color: rgba(0, 0, 0, 0.5);;
+    padding: 4px;
+    font-family: "PixelifySans";
+    color: rgb(200, 200, 200)
 }
 
 

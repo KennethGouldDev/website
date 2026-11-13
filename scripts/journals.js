@@ -177,7 +177,7 @@ journals.forEach(journal =>{
 
 // lets make them appear one by one
 // you can not only get the element, you can get the index of the element as shown here
-const initialDelay = 1800;
+const initialDelay = 1400;
 let staggerDelay = 500;
 let staggerDelayMultiplier = 0.92
 

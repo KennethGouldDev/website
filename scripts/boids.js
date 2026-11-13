@@ -36,7 +36,8 @@ window.addEventListener("mousemove", (event) => {
 
 let boids = []
 
-let boids_amount = 300;
+let boids_amount = 0;
+let maximum_boids = 300;
 
 let alignment_strength = .8;
 let avoidance_strength = 3;
@@ -117,12 +118,11 @@ let boid_stopwatch = -1
 function physics_process(delta, time){
 
     // change boids amount based on window width
+    let calculated_amount = 30 + (window.innerWidth * window.innerHeight) / 6000
     boids_amount = Math.round(Math.min(
-        300, 
-        50 + window.innerWidth/5
+        maximum_boids, 
+        calculated_amount
     ))
-    console.log(boids_amount)
-    console.log(boids.length)
 
     if (boids.length > boids_amount){
         // more boids than there should be

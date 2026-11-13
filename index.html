@@ -13,16 +13,23 @@
  <script src="scripts/stars.js" defer></script>
  <script src="scripts/nameplate.js" defer></script>
  <script type="module" src="scripts/thoughts.js" defer></script>
-
+ 
  <!-- cool custom starry background -->
  <canvas id="background"></canvas>
-
+ 
+ <!-- button to hide the info so you can see the background -->
+ <script src="scripts/hide-button.js" defer></script>
+ <button id="hide-button">hide ui<br>v</button>
+ <div id="ui">
+ 
+ 
  <!-- top bar display -->
-  <header id="nameplate">
+ <header id="nameplate">
      <h1 id="nameplate-text">Kenneth Gould</h1>
      <div id="nameplate-clicks-display">clicks: 0</div>
- </header>
-
+</header>
+    
+    
 <main class="layout">
     <!-- navigation panel-->
     <section class="left-side">
@@ -115,4 +122,5 @@
 
 </main>
 
+</div>
 </html>

@@ -44,6 +44,48 @@
     opacity: 1;
 }
 
+/* hide button */
+#hide-button{
+    color: rgba(255, 255, 255, 0.5);
+    background-color: rgba(0, 0, 0, 0.25);
+    font-family: "GeistPixel";
+    font-size: 1.1rem;
+    height: 60px;
+    transform: translateY(-30px);
+    transition: transform .5s ease;
+    border-radius: 5px;
+    white-space: nowrap;
+    box-shadow: none;
+    outline: none;
+    border: none;
+    padding-bottom: 5px;
+
+    /* put it in top right corner */
+    position: fixed;
+    top: 0px;
+    right: 10px;
+    z-index: 1;
+    display: flex;
+    align-items: flex-end;
+
+    /* fade in at start */
+    opacity: 0;
+    animation: hideUiIn 1s ease 3s both;
+}
+#hide-button:hover{
+    transform: translateY(-5px)
+}
+
+/* anything with the `hide-ui` class gets hidden */
+.hide-ui{
+    opacity: 0;
+    pointer-events: none;
+    user-select: none;
+}
+#ui{
+    transition: opacity 0.5s ease;
+}
+
 
 @keyframes warningSlideOut{
     from{
@@ -65,6 +107,16 @@
 
     to{
         transform: translateX(0px);
+        opacity: 1;
+    }
+}
+
+@keyframes hideUiIn{
+    from{
+        opacity: 0;
+    }
+
+    to{
         opacity: 1;
     }
 }
