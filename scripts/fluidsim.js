@@ -182,6 +182,9 @@ function physics_process(delta, time){
         stroke_colors[particle_i].g = colors[particle_i].g - 50
         stroke_colors[particle_i].b = colors[particle_i].b - 50
 
+
+        
+
         // calculate pressure
         
         // apply pressure
