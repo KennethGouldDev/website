@@ -4,16 +4,22 @@
 
 
 
+<!-- thought -->
+
+2026-11-13
+maybe i should add a page dedicated to my music taste and skills
 
 
+<!-- thought -->
 
-
+2026-11-13
+being satisfied and dissatisfied at the same time is such a weird and interesting contradiction... i should write about that
 
 
 <!-- thought -->
 
 2026-11-12
-gay lookin boi, so gay i can barely say it with a straight face lookin boi (eminem)
+gay lookin boy, so gay i can barely say it with a straight face lookin boy
 
 
 <!-- thought -->

@@ -256,6 +256,10 @@ body{
     margin-left: 0px;
     font-family: "PixelifySans";
 }
+.panel.todo ul.todo-done{
+    text-decoration: line-through;
+    opacity: 0.5;
+}
 
 .panel{
     background-color: rgba(12, 12, 14, 0.8);
