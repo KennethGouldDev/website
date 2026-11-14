@@ -125,8 +125,42 @@ function animate(timestamp){
         ctx.stroke();
     }
 
-    // grid visualization thing
+        // grid visualization thing
+    ctx.fillStyle = "rgba(200,50,50,0.8)";
+    grid_length_x = Math.ceil(background_canvas.width/grid_cell_size)
+    grid_length_y = Math.ceil(background_canvas.height/grid_cell_size)
+    for (let x = 0; x < grid_length_x; x++) {
+        ctx.fillRect(x * grid_cell_size, 0, 2, 10000)
+    }
+    for (let y = 0; y < grid_length_y; y++) {
+        ctx.fillRect(0, y * grid_cell_size, 10000, 2)
+    }
     
+    // show which grid is taken
+    for (let x = 0; x < grid.length; x++) {
+        for (let y = 0; y < grid[x].length; y++) {
+            if (grid[x][y].length > 0){
+                ctx.fillStyle = "rgba(255,0,0,0.4)"
+                ctx.fillRect(x * grid_cell_size, y * grid_cell_size, grid_cell_size, grid_cell_size)
+
+                // if there are any neighbors, color purple
+                let neighbor_arrays = get_3x3_grid_cells(x, y, false)
+                let is_neighbors = false
+                for (let i = 0; i < neighbor_arrays.length; i++) {
+                    const element = neighbor_arrays[i];
+                    // skip self
+                    if (element.length > 0){
+                        is_neighbors = true
+                        break
+                    }
+                }
+                if (is_neighbors){
+                    ctx.fillStyle = "rgba(0,200,200,0.5)"
+                    ctx.fillRect(x * grid_cell_size, y * grid_cell_size, grid_cell_size, grid_cell_size)
+                }
+            };
+        }
+    }
 
     requestAnimationFrame(animate)
 }
@@ -149,7 +183,8 @@ function physics_process(delta, time){
         if (clicking){
             // see if particle is near mouse
             let to_particle = {x: positions[i].x - mouse.x, y: positions[i].y - mouse.y}
-            if (Math.hypot(to_particle.x, to_particle.y) < 500){
+            let magnitude = Math.hypot(to_particle.x, to_particle.y)
+            if (magnitude < 500){
                 velocities[i].x -= to_particle.x * delta * 10
                 velocities[i].y -= to_particle.y * delta * 10
             }
@@ -209,9 +244,80 @@ function randf_range(a, b){
 // the grid is gonna be an arrays of arrays
 // gonna be accessed as if it is 2d. example: grid[x][y]
 let grid = []
-let grid_cell_size = 100
+let grid_cell_size = 80
 function doGrid(){
     // clear the grid
     grid = []
     // push the proper amount of arrays
+    grid_length_x = Math.ceil(background_canvas.width/grid_cell_size)
+    grid_length_y = Math.ceil(background_canvas.height/grid_cell_size)
+    for (let x = 0; x < grid_length_x; x++) {
+        // add x array
+        grid.push([])
+        for (let y = 0; y < grid_length_y; y++) {
+            grid[x].push([])
+        }
+    }
+    // go through all the particles and put them in the right grid
+    for (let i = 0; i < positions.length; i++) {
+        let grid_x = Math.floor(positions[i].x / grid_cell_size)
+        let grid_y = Math.floor(positions[i].y / grid_cell_size)
+        grid[grid_x][grid_y].push(i)
+    }
+}
+
+function get_3x3_grid_cells(x, y, include_self = true){
+    let ret = []
+    // we do this in reading order
+
+    // check top
+    if (y > 0){
+        // top left
+        // check left
+        if (x > 0){
+            ret.push(grid[x-1][y-1])
+        }
+        // top middle
+        ret.push(grid[x][y-1])
+        // top right
+        // check right
+        if (x < grid.length - 1){
+            ret.push(grid[x+1][y-1])
+        }
+    }
+
+    // now middle
+
+    // middle left
+    // check left
+    if (x > 0){
+        ret.push(grid[x-1][y])
+    }
+    // top middle
+    if (include_self){
+        ret.push(grid[x][y])
+    }
+    // middle right
+    // check right
+    if (x < grid.length - 1){
+        ret.push(grid[x+1][y])
+    }
+
+    // now bottom
+    // check bottom
+    if (y < grid[x].length - 1){
+        // bottom left left
+        // check left
+        if (x > 0){
+            ret.push(grid[x-1][y+1])
+        }
+        // bottom middle
+        ret.push(grid[x][y+1])
+        // bottom right
+        // check right
+        if (x < grid.length - 1){
+            ret.push(grid[x+1][y+1])
+        }
+    }
+    return ret
 }
