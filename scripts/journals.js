@@ -18,7 +18,7 @@ async function loadJournals(){
     // load each markdown file
     // cant do a normal arrow function here because we have to keep it async
     for (const file of files){
-        console.log(`Trying to find journal ${file}`)
+        console.log(`Trying to load ${file}...`)
         const markdownResponse = await fetch(`../journal_entries/${file}`)
 
         // error log if cant load a journal
@@ -91,7 +91,8 @@ async function loadJournals(){
         // avengers assemble!!
         entry.append(summary, journalContent)
         journalContainer.appendChild(entry)
-        console.log("end")
+
+        console.log("Loaded!")
     }
 }
 
@@ -177,8 +178,8 @@ journals.forEach(journal =>{
 
 // lets make them appear one by one
 // you can not only get the element, you can get the index of the element as shown here
-const initialDelay = 1400;
-let staggerDelay = 500;
+const initialDelay = 1300;
+let staggerDelay = 800;
 let staggerDelayMultiplier = 0.92
 
 journals.forEach((journal, index) => {

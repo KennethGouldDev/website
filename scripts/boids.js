@@ -37,15 +37,15 @@ window.addEventListener("mousemove", (event) => {
 let boids = []
 
 let boids_amount = 0;
-let maximum_boids = 300;
+let maximum_boids = 1000;
 
 let alignment_strength = .8;
 let avoidance_strength = 3;
 let cohesion_strength = .2;
 
-let alignment_distance = 80;
-let avoidance_distance = 60;
-let cohesion_distance = 120;
+let alignment_distance = 60;
+let avoidance_distance = 50;
+let cohesion_distance = 80;
 let dont_overlap_distance = 40;
 
 // animation and physics functions
@@ -105,24 +105,26 @@ function animate(timestamp){
     });
 
 
-
+    // doGridVisualization()
 
 
     prev_time = timestamp
     requestAnimationFrame(animate)
 }
 
-let boid_spawn_interval = 0.3
+let boid_spawn_interval = 0.4
 let boid_stopwatch = -1
 
 function physics_process(delta, time){
 
     // change boids amount based on window width
-    let calculated_amount = 30 + (window.innerWidth * window.innerHeight) / 6000
+    let calculated_amount = 30 + (window.innerWidth * window.innerHeight) / 2500
     boids_amount = Math.round(Math.min(
         maximum_boids, 
         calculated_amount
     ))
+    console.log(boids_amount)
+    console.log(boids.length)
 
     if (boids.length > boids_amount){
         // more boids than there should be
@@ -134,16 +136,16 @@ function physics_process(delta, time){
         boid_stopwatch += delta
         while (boid_stopwatch > boid_spawn_interval){
             boid_stopwatch -= boid_spawn_interval
-            boid_spawn_interval *= .9
-            boid_spawn_interval = Math.max(boid_spawn_interval, 0.03)
+            boid_spawn_interval *= .91
+            boid_spawn_interval = Math.max(boid_spawn_interval, 0.02)
 
             boids.push({
                 x: randf_range(0,background_canvas.width),
                 y: -10,
                 angle: randf_range(0, 3.141592653589 * 2),
                 speed: 100,
-                length: 30,
-                thickness: 20,
+                length: 20,
+                thickness: 15,
                 color_r: 40,
                 color_g: 40,
                 color_b: 40,
@@ -151,15 +153,22 @@ function physics_process(delta, time){
         }
     }
 
+    // do grid
+    doGrid()
+
     // boid physics
     boids.forEach(boid =>{
 
-        // make them avoid eachother
-        // note be careful here we are nesting a for loop which means a 
-        // ton of calculations! man i hope this runs okay
+        // loop through all the neighbors!
+        // get nearby boids
+        let grid_pos = get_grid_cell_position_from_position(boid.x, boid.y)
+        let grid_neighbors = get_3x3_grid_cells(grid_pos.x, grid_pos.y)
+        let boid_neighbors = get_boids_from_cells(grid_neighbors)
+
         let average_fellow_position = {x: 0, y: 0}
         let num_neighbors = 0
-        boids.forEach(fellowBoid =>{
+
+        boid_neighbors.forEach(fellowBoid =>{
             if (boid != fellowBoid){
                 // make sure the fellow boid is in front of us
                 // dot product trickery to figure this out
@@ -239,7 +248,7 @@ function physics_process(delta, time){
         boid.color_r = boid.color_r + (target_r - boid.color_r) * delta * 2
         boid.color_b = boid.color_b + (target_b - boid.color_b) * delta * 2
         // slower the more boids following
-        boid.speed = 120 + num_neighbors * -1
+        boid.speed = 110 + num_neighbors * -1
 
 
         // make them steer away from the mouse
@@ -293,4 +302,152 @@ function angle_difference(a, b){
         Math.sin(b - a),
         Math.cos(b - a)
     )
+}
+
+
+// the grid is gonna be an arrays of arrays
+// gonna be accessed as if it is 2d. example: grid[x][y]
+let grid = []
+let grid_cell_size = cohesion_distance/2
+function doGrid(){
+    // clear the grid
+    grid = []
+    // push the proper amount of arrays
+    grid_length_x = Math.ceil(background_canvas.width/grid_cell_size)
+    grid_length_y = Math.ceil(background_canvas.height/grid_cell_size)
+    for (let x = 0; x < grid_length_x; x++) {
+        // add x array
+        grid.push([])
+        for (let y = 0; y < grid_length_y; y++) {
+            grid[x].push([])
+        }
+    }
+
+    // go through all the boids and put them in the right grid
+    for (let i = 0; i < boids.length; i++) {
+        // clamp it after
+        let boid = boids[i]
+        let grid_pos = get_grid_cell_position_from_position(boid.x, boid.y)
+        grid[grid_pos.x][grid_pos.y].push(boids[i])
+    }
+}
+
+function get_3x3_grid_cells(x, y, include_this_cell = true){
+    let ret = []
+    // we do this in reading order
+
+    // check top
+    if (y > 0){
+        // top left
+        // check left
+        if (x > 0){
+            ret.push(grid[x-1][y-1])
+        }
+        // top middle
+        ret.push(grid[x][y-1])
+        // top right
+        // check right
+        if (x < grid.length - 1){
+            ret.push(grid[x+1][y-1])
+        }
+    }
+
+    // now middle
+
+    // middle left
+    // check left
+    if (x > 0){
+        ret.push(grid[x-1][y])
+    }
+    // top middle
+    if (include_this_cell){
+        ret.push(grid[x][y])
+    }
+    // middle right
+    // check right
+    if (x < grid.length - 1){
+        ret.push(grid[x+1][y])
+    }
+
+    // now bottom
+    // check bottom
+    if (y < grid[x].length - 1){
+        // bottom left left
+        // check left
+        if (x > 0){
+            ret.push(grid[x-1][y+1])
+        }
+        // bottom middle
+        ret.push(grid[x][y+1])
+        // bottom right
+        // check right
+        if (x < grid.length - 1){
+            ret.push(grid[x+1][y+1])
+        }
+    }
+    return ret
+}
+
+function get_boids_from_cells(cells){
+    let ret = []
+    for (let arrayi = 0; arrayi < cells.length; arrayi++) {
+        const array = cells[arrayi];
+
+        // no boids in this array? skip it
+        if (array.length == 0) continue;
+
+        for (let i = 0; i < array.length; i++) {
+            const boid = array[i];
+            ret.push(boid)
+        }
+    }
+    return ret
+}
+
+function get_grid_cell_position_from_position(x, y){
+    let ret = {x: Math.floor(x/grid_cell_size), y: Math.floor(y/grid_cell_size)}
+    // clamp
+    let grid_length_x = Math.ceil(background_canvas.width/grid_cell_size)
+    let grid_length_y = Math.ceil(background_canvas.height/grid_cell_size)
+    ret.x = Math.min(Math.max(0, ret.x), grid_length_x - 1)
+    ret.y = Math.min(Math.max(0, ret.y), grid_length_y - 1)
+    return ret
+}
+
+function doGridVisualization(){
+    ctx.fillStyle = "rgba(200,50,50,0.8)";
+    grid_length_x = Math.ceil(background_canvas.width/grid_cell_size)
+    grid_length_y = Math.ceil(background_canvas.height/grid_cell_size)
+    for (let x = 0; x < grid_length_x; x++) {
+        ctx.fillRect(x * grid_cell_size, 0, 2, 10000)
+    }
+    for (let y = 0; y < grid_length_y; y++) {
+        ctx.fillRect(0, y * grid_cell_size, 10000, 2)
+    }
+    
+    // show which grid is taken
+    for (let x = 0; x < grid.length; x++) {
+        for (let y = 0; y < grid[x].length; y++) {
+            if (grid[x][y].length > 0){
+                ctx.fillStyle = "rgba(255,0,0,0.4)"
+                ctx.fillRect(x * grid_cell_size, y * grid_cell_size, grid_cell_size, grid_cell_size)
+
+                // if there are any neighbors, color purple
+                let neighbor_arrays = get_3x3_grid_cells(x, y, false)
+                let is_neighbors = false
+                for (let i = 0; i < neighbor_arrays.length; i++) {
+                    const element = neighbor_arrays[i];
+                    // skip self
+                    if (element.length > 0){
+                        is_neighbors = true
+                        break
+                    }
+                }
+                if (is_neighbors){
+                    ctx.fillStyle = "rgba(0,200,200,0.5)"
+                    ctx.fillRect(x * grid_cell_size, y * grid_cell_size, grid_cell_size, grid_cell_size)
+                }
+            };
+        }
+    }
 }

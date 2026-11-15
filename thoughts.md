@@ -1,8 +1,32 @@
 
+<!-- thought -->
+
+2026-11-14
+OMG the fluid simulation is ALREADY better than my first one!! <span class="quiet">(check it out it's in projects)</span>
 
 
+<!-- thought -->
+
+2026-11-14
+the boids simulation can now handle TWO THOUSAND BOIDS MUAHAHAH
 
 
+<!-- thought -->
+
+2026-11-14
+Hiding yourself cause you dont wanna get hurt more is one of the worst pains ever
+
+
+<!-- thought -->
+
+2026-11-13
+doing so much stuff for my future self feels so cool
+
+
+<!-- thought -->
+
+2026-11-13
+fry screaming is pretty cool
 
 <!-- thought -->
 
