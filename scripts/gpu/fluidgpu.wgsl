@@ -21,4 +21,5 @@ var<storage, read_write> radii: array<f32>;
 @compute @workgroup_size(64)
 fn main( @builtin(global_invocation_id) id: vec3<u32>){
     let i = id.x;
+    densities[i] = f32(i)
 }
