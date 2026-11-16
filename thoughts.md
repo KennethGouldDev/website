@@ -1,3 +1,9 @@
+<!-- thought -->
+
+2026-11-15
+I bet in hell they make you write a ton of shader code and networking code. this is HELL
+
+
 
 <!-- thought -->
 

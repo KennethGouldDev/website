@@ -1,3 +1,4 @@
+// get background canvas
 /** @type {HTMLCanvasElement} */
 const background_canvas = document.getElementById("background");
 // this gets the canvas' drawing api. think of this variable, `ctx`, as your drawing tool
@@ -43,7 +44,7 @@ document.addEventListener("mouseup", () =>{
 
 
 // fluid sim!
-let particle_amount = 1500;
+let particle_amount = 1000;
 
 let gravity = 500;
 let target_density = 1;
@@ -51,7 +52,7 @@ let border_damping = 0.95;
 let air_damping = 0.995;
 
 let density_coefficient = 1000;
-let pressure_coefficient = 800000000
+let pressure_coefficient = 1000000000
 let viscosity_coefficient = 5000000
 
 let density_influence_radius = 60
@@ -377,7 +378,7 @@ function physics_process(delta, time){
     // calculate what values we are workin with now
     // `...` in javascript takes the array and spreads them out
     // so this will get the biggest number out of all the densities
-    console.log(Math.max(...densities))
+    // console.log(Math.max(...densities))
 }
 
 function get_neighbor_particles(particle_i) {
