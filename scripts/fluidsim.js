@@ -44,7 +44,7 @@ document.addEventListener("mouseup", () =>{
 
 
 // fluid sim!
-let particle_amount = 1000;
+let particle_amount = 300;
 
 let gravity = 500;
 let target_density = 1;
@@ -85,10 +85,12 @@ for (let i = 0; i < particle_amount; i++){
     let offset_x = -root/2
     offset_x += i % root
     pos_x += offset_x * 20
+    pos_x += (Math.random() - 0.5) * 10
     let pos_y = background_canvas.height/2
     let offset_y = -root/2
     offset_y += Math.floor(i / root)
     pos_y += offset_y * 20
+    pos_y += (Math.random() - 0.5) * 10
     positions.push({x: pos_x, y: pos_y})
     velocities.push({x: 0, y: 0})
     densities.push(0)
