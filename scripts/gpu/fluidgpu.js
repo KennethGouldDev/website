@@ -1,11 +1,49 @@
 /** @type {GPUDevice | null} */
 let device
 
-// get background canvas
+// ------------------------------------------ CANVAS
 /** @type {HTMLCanvasElement} */
 const background_canvas = document.getElementById("background");
 // this gets the canvas' drawing api. think of this variable, `ctx`, as your drawing tool
 const ctx = background_canvas.getContext("2d");
+
+// make the canvas match the window size
+background_canvas.width = window.innerWidth;
+background_canvas.height = window.innerHeight;
+
+// make it so the background canvas resizes whenever the window gets resized
+window.addEventListener("resize", () =>{
+    let width_delta = window.innerWidth - background_canvas.width
+    let height_delta = window.innerHeight - background_canvas.height
+    background_canvas.width = window.innerWidth;
+    background_canvas.height = window.innerHeight;
+
+    // TODO we should  update the particle positions
+    // when we resize the window. We need to do that on
+    // gpu tho.
+})
+
+// track mouse
+let mouse = {
+    x: 0,
+    y: 0
+}
+window.addEventListener("mousemove", (event) => {
+    mouse.x = event.clientX;
+    mouse.y = event.clientY;
+})
+
+// get if the mouse is clicked
+let clicking = false
+
+document.addEventListener("mousedown", () =>{
+    clicking = true
+})
+document.addEventListener("mouseup", () =>{
+    clicking = false
+})
+
+// --------------------------------------------- FLUID SIM
 
 let particle_amount = 100
 
@@ -33,6 +71,7 @@ let density_influence_radius = 60
 let pressure_influence_radius = 50
 let viscosity_influence_radius = 60
 
+// GPU!!!
 // ----------------------------------------------- INITIALIZE
 
 // create particle data
@@ -47,34 +86,121 @@ let readback_buffers = {}
 initialize_buffers()
 
 // get the actual scripts
-await initialize_shaders()
+let shader_module = await initialize_shaders()
 
 let pipelines = {
     density: null,
     pressure: null,
     viscosity: null,
     // integration is just gonna be actually applying forces
+    // and also all the other stuff
     integration: null
 }
-intialize_pipelines()
 
-initialize_bind_groups()
+initialize_pipelines()
 
-
-
-// ------------------------------------------------- COMPUTE
-
-
-// connect the buffers to the shader bindings
+let bind_groups = initialize_bind_groups()
 
 // ------------------------------------------------------ READBACK
 
 copy_gpu_data_to_readback()
 let data = await get_gpu_particle_data()
-console.log(data.densities)
+// feed it back into the variables
+apply_gpu_particle_data(data)
+console.log(data.positions)
 
 // ------------------------------------------------------ RENDER
 
+let prev_timestamp = 0
+let physics_accumulate = 0;
+const physics_delta = 1.0/60.0;
+
+requestAnimationFrame(animate)
+function animate(timestamp){
+    // requestAnimationFrame doesnt give deltatime, instead it gives a timestamp.
+    // with this, we can calculate deltatime though.
+    // NOTE timestamp is in milliseconds, thats why we divide by 1000 here
+    let delta = (timestamp - prev_timestamp) / 1000;
+    prev_timestamp = timestamp
+    let time = timestamp/1000;
+
+    // do physics process
+    // some trickery to make sure it runs at a fixed timestep
+    physics_accumulate += delta
+    while (physics_accumulate > physics_delta) {
+        if (physics_accumulate > physics_delta * 10){
+            // dont make it execute more than ten times in one frame
+            physics_accumulate = 0
+            break
+        }
+        physics_accumulate -= physics_delta
+        physics_process(physics_delta, time)
+    }
+
+    // copy gpu data back to javascript
+
+    // NOTE eventually you DONT want to be doing
+    // this every frame. However for now, for debugging,
+    // we will. DELETE THIS LATER
+    // this is a NIGHTMARE because the cpu and gpu sync sucks.
+    // maybe i shoud be doing gpu rendering.. FUCK
+    immediately_apply_particle_data()
+
+    // clear previous frame
+    ctx.clearRect(0,0, background_canvas.width, background_canvas.height)
+
+    // draw particles
+    for (let i = 0; i < particle_amount; i++) {
+        // draw circle
+        ctx.beginPath();
+        ctx.arc(positions[i].x, positions[i].y, radii[i], 
+            0, 2 * Math.PI)
+        ctx.fillStyle = "rgb(50, 50, 255)"
+        ctx.fill()
+        ctx.strokeStyle = "rgba(50,50,150,0.8)"
+        ctx.lineWidth = 4;
+        ctx.stroke();
+    }
+
+    requestAnimationFrame(animate)
+}
+
+async function immediately_apply_particle_data(){
+    copy_gpu_data_to_readback()
+    let data = await get_gpu_particle_data()
+    // feed it back into the variables
+    apply_gpu_particle_data(data)
+}
+
+// PHYSICS PROCESS
+
+function physics_process(delta, time){
+    let workgroup_size = 64
+
+    // create an object for recording the GPU commands
+    const command_encoder = device.createCommandEncoder()
+    // begin the compute pass. This is where we give the commands
+    const compute_pass = command_encoder.beginComputePass()
+
+    // density
+    compute_pass.setPipeline(pipelines.density)
+    compute_pass.setBindGroup(0, bind_groups.calculateDensity_bind_group)
+    compute_pass.dispatchWorkgroups( Math.ceil(particle_amount / workgroup_size))
+
+    // pressure
+    compute_pass.setPipeline(pipelines.pressure)
+    compute_pass.setBindGroup(0, bind_groups.calculatePressures_bind_group)
+    compute_pass.dispatchWorkgroups( Math.ceil(particle_amount / workgroup_size))
+
+    compute_pass.end()
+
+    // finally submit the commands to the gpu queue.
+    device.queue.submit([
+        command_encoder.finish()
+    ])
+}
+
+// ------------------------------------------------------ FUNCTIONS
 
 function create_particle_data(){
     let root = Math.ceil(Math.sqrt(particle_amount))
@@ -124,6 +250,12 @@ async function initialize_gpu(){
 
     // get device (interface)
     device = await adapter.requestDevice()
+
+    // make it so if theres an error we can catch it
+    // sometimes webgpu errors can be sneaky
+    device.addEventListener("uncapturederror", (event) => {
+        console.error("WebGPU Error: ", event.error)
+    })
 }
 
 // function to create a storage buffer for the gpu.
@@ -279,6 +411,17 @@ async function get_gpu_particle_data(){
     ret.viscosity_accelerations = convert_packed_to_vector_array(ret.viscosity_accelerations)
     return ret
 }
+function apply_gpu_particle_data(data){
+    positions = data.positions
+    velocities = data.velocities
+    pressure_accelerations = data.pressure_accelerations
+    viscosity_accelerations = data.viscosity_accelerations
+
+    densities = data.densities
+    pressures = data.pressures
+    masses = data.masses
+    radii = data.radii
+}
 
 async function initialize_shaders(){
     // make the shader modules
@@ -303,10 +446,93 @@ async function initialize_shaders(){
     // we just declare different entry points.
 }
 
-function intialize_pipelines(){
-
+// create the pipelines ( basically what code are we gonna be executing,
+// what commands do we actually wanna give to the gpu )
+function initialize_pipelines(){
+    pipelines.density =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "calculateDensities"
+            }
+        }),
+    pipelines.pressure =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "calculatePressures"
+            }
+        }),
+    pipelines.pressureAccelerations =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "calculatePressureAccelerations"
+            }
+        })
+    pipelines.viscosityAccelerations =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "calculateViscosityAccelerations"
+            }
+        })
+    pipelines.Integrate =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "Integrate"
+            }
+        })
 }
 
+// bind groups basically connect the pipelines to actual gpu buffers
+// so you can use the info from those buffers in your code
+
+// basically a bind group for every function that we want to execute,
+// and we lay out what buffers we want to use in those functions.
+// quirk that I ran into, you MUST put the buffer here if you want to use it
+// in the wgsl function, and you MUST ACTUALLY USE the variable in the function
+// for it to not scream at you. so weird dude.
 function initialize_bind_groups(){
-
+    return {
+        calculateDensity_bind_group: device.createBindGroup({
+            layout: pipelines.density.getBindGroupLayout(0),
+            // not doing a for loop here because simply its important
+            // that these are in the same order as the bindings in
+            // fluidgpu.wgsl
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: gpu_buffers.positions }
+                },
+                {
+                    binding: 4,
+                    resource: { buffer: gpu_buffers.densities }
+                }
+            ]
+        }),
+        calculatePressures_bind_group: device.createBindGroup({
+            layout: pipelines.pressure.getBindGroupLayout(0),
+            // not doing a for loop here because simply its important
+            // that these are in the same order as the bindings in
+            // fluidgpu.wgsl
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: gpu_buffers.positions }
+                },
+                {
+                    binding: 4,
+                    resource: { buffer: gpu_buffers.densities }
+                }
+            ]
+        }) 
+    }
 }
+

@@ -1,5 +1,13 @@
 <!-- thought -->
 
+2026-11-16
+over the past few days the only thing I've been trying to do is figure out how to write a compute shader with js and webgpu.
+It's been a nightmare.
+after hours and hours, i finally feel like maybe i understand half of what I'm doing
+
+
+<!-- thought -->
+
 2026-11-15
 I bet in hell they make you write a ton of shader code and networking code. this is HELL
 

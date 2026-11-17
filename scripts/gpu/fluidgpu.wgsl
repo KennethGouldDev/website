@@ -19,7 +19,53 @@ var<storage, read_write> masses: array<f32>;
 var<storage, read_write> radii: array<f32>;
 
 @compute @workgroup_size(64)
-fn main( @builtin(global_invocation_id) id: vec3<u32>){
+fn calculateDensities( @builtin(global_invocation_id) id: vec3<u32>){
     let i = id.x;
-    densities[i] = f32(i)
+
+    // dont go past how many elements there are
+    if (i >= arrayLength(&densities)){ return; }
+
+    densities[i] = f32(i);
+
+    positions[i].y += 1;
+}
+
+@compute @workgroup_size(64)
+fn calculatePressures( @builtin(global_invocation_id) id: vec3<u32>){
+    let i = id.x;
+
+    // dont go past how many elements there are
+    if (i >= arrayLength(&densities)){ return; }
+
+    densities[i] += 0;
+
+    positions[i].y += 1;
+
+}
+
+@compute @workgroup_size(64)
+fn calculatePressureAccelerations( @builtin(global_invocation_id) id: vec3<u32>){
+    let i = id.x;
+
+    // dont go past how many elements there are
+    if (i >= arrayLength(&densities)){ return; }
+
+
+    
+}
+
+@compute @workgroup_size(64)
+fn calculateViscosityAccelerations( @builtin(global_invocation_id) id: vec3<u32>){
+    let i = id.x;
+
+    // dont go past how many elements there are
+    if (i >= arrayLength(&densities)){ return; }
+
+
+    
+}
+
+@compute @workgroup_size(64)
+fn Integrate( @builtin(global_invocation_id) id: vec3<u32>){
+
 }
