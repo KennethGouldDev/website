@@ -1,5 +1,10 @@
 <!-- thought -->
 
+2026-11-17
+Sit down and work through it
+
+<!-- thought -->
+
 2026-11-16
 over the past few days the only thing I've been trying to do is figure out how to write a compute shader with js and webgpu.
 It's been a nightmare.

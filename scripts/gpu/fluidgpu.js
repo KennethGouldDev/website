@@ -4,8 +4,14 @@ let device
 // ------------------------------------------ CANVAS
 /** @type {HTMLCanvasElement} */
 const background_canvas = document.getElementById("background");
-// this gets the canvas' drawing api. think of this variable, `ctx`, as your drawing tool
-const ctx = background_canvas.getContext("2d");
+// get the webgpu canvas context (its like the webgpu equivalent of ctx)
+/** @type {GPUCanvasContext} */
+const webgpu_context = background_canvas.getContext("webgpu")
+
+// this gets initialized with the gpu
+let gpu_canvas_format
+// this get initialized with the pipelines
+let gpu_render_pipeline
 
 // make the canvas match the window size
 background_canvas.width = window.innerWidth;
@@ -57,12 +63,14 @@ let pressure_accelerations = []
 let viscosity_accelerations = []
 let masses = [];
 let radii = [];
+
 // These are constants/parameters that *dont* change per particle.
 // These we will instead put into a uniform buffer
 let gravity = 500
 let target_density = 1
 let border_damping = 0.95
 let air_damping = 0.995
+let physics_delta_time = 1.0/60.0;
 
 let pressure_coefficient = 10
 let viscosity_coefficient = 50
@@ -83,7 +91,12 @@ await initialize_gpu()
 let gpu_buffers = {}
 let readback_buffers = {}
 
-initialize_buffers()
+initialize_buffers_with_data()
+let uniform_data
+let uniform_floats
+let uniform_uints
+let uniform_buffer
+initialize_uniform_buffer()
 
 // get the actual scripts
 let shader_module = await initialize_shaders()
@@ -113,8 +126,8 @@ console.log(data.positions)
 
 let prev_timestamp = 0
 let physics_accumulate = 0;
-const physics_delta = 1.0/60.0;
 
+let requesting_readback  = false
 requestAnimationFrame(animate)
 function animate(timestamp){
     // requestAnimationFrame doesnt give deltatime, instead it gives a timestamp.
@@ -127,24 +140,61 @@ function animate(timestamp){
     // do physics process
     // some trickery to make sure it runs at a fixed timestep
     physics_accumulate += delta
-    while (physics_accumulate > physics_delta) {
-        if (physics_accumulate > physics_delta * 10){
+    while (physics_accumulate > physics_delta_time) {
+        if (physics_accumulate > physics_delta_time * 10){
             // dont make it execute more than ten times in one frame
             physics_accumulate = 0
             break
         }
-        physics_accumulate -= physics_delta
-        physics_process(physics_delta, time)
+        physics_accumulate -= physics_delta_time
+        physics_process(physics_delta_time, time)
     }
 
-    // copy gpu data back to javascript
+    render_gpu()
 
-    // NOTE eventually you DONT want to be doing
-    // this every frame. However for now, for debugging,
-    // we will. DELETE THIS LATER
-    // this is a NIGHTMARE because the cpu and gpu sync sucks.
-    // maybe i shoud be doing gpu rendering.. FUCK
-    immediately_apply_particle_data()
+    requestAnimationFrame(animate)
+}
+
+function render_gpu(){
+    // make command encoder
+    const command_encoder = device.createCommandEncoder()
+
+    // get the canvas texture (basically the image we are about to draw onto)
+    const texture = webgpu_context.getCurrentTexture()
+
+    // begin the render pass
+    const render_pass = command_encoder.beginRenderPass({
+        // this is where the render pass gets configured
+        colorAttachments: [{
+            // the view describes how the texture is accessed by the GPU operations
+            view: texture.createView(),
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            // clear the previous image before drawing
+            loadOp: "clear",
+            // preserve the result when done
+            storeOp: "store"
+        }]
+    })
+
+    render_pass.setPipeline(gpu_render_pipeline)
+    render_pass.setBindGroup(0, bind_groups.vertex_bind_group)
+    render_pass.setBindGroup(1, bind_groups.render_settings_bind_group)
+    // draw three vertices for each particle
+    // the arguments are: Vertex count, Instance amount
+    // so, draw particle_amount objects with 3 vertices
+    render_pass.draw(3, particle_amount)
+
+    render_pass.end()
+
+    device.queue.submit([command_encoder.finish()])
+}
+
+// this is more of a debug function that renders all the particles
+// with the cpu
+async function render_on_cpu(){
+    copy_gpu_data_to_readback()
+    let data = await get_gpu_particle_data()
+    apply_gpu_particle_data(data)
 
     // clear previous frame
     ctx.clearRect(0,0, background_canvas.width, background_canvas.height)
@@ -161,20 +211,14 @@ function animate(timestamp){
         ctx.lineWidth = 4;
         ctx.stroke();
     }
-
-    requestAnimationFrame(animate)
-}
-
-async function immediately_apply_particle_data(){
-    copy_gpu_data_to_readback()
-    let data = await get_gpu_particle_data()
-    // feed it back into the variables
-    apply_gpu_particle_data(data)
 }
 
 // PHYSICS PROCESS
 
 function physics_process(delta, time){
+    // update settings
+    update_uniform_buffer()
+
     let workgroup_size = 64
 
     // create an object for recording the GPU commands
@@ -190,6 +234,11 @@ function physics_process(delta, time){
     // pressure
     compute_pass.setPipeline(pipelines.pressure)
     compute_pass.setBindGroup(0, bind_groups.calculatePressures_bind_group)
+    compute_pass.dispatchWorkgroups( Math.ceil(particle_amount / workgroup_size))
+
+    // integrate
+    compute_pass.setPipeline(pipelines.integrate)
+    compute_pass.setBindGroup(0, bind_groups.integrate_bind_group)
     compute_pass.dispatchWorkgroups( Math.ceil(particle_amount / workgroup_size))
 
     compute_pass.end()
@@ -256,6 +305,16 @@ async function initialize_gpu(){
     device.addEventListener("uncapturederror", (event) => {
         console.error("WebGPU Error: ", event.error)
     })
+    
+    // initialize the canvas so we can draw
+    gpu_canvas_format = navigator.gpu.getPreferredCanvasFormat()
+
+    webgpu_context.configure({
+        device: device,
+        format: gpu_canvas_format,
+        // determines how the transparency is handled. this is just a common choice
+        alphaMode: "premultiplied"
+    })
 }
 
 // function to create a storage buffer for the gpu.
@@ -309,7 +368,7 @@ function convert_packed_to_vector_array(data){
     return ret
 }
 
-function initialize_buffers(){
+function initialize_buffers_with_data(){
     // convert all the variables into gpu friendlly
     const position_data = convert_vector_array_to_packed(positions)
     const velocity_data = convert_vector_array_to_packed(velocities)
@@ -345,7 +404,58 @@ function initialize_buffers(){
     }
 }
 
-// this function is used as shorthand for the initialize_buffers() function
+
+function initialize_uniform_buffer(){
+    uniform_buffer = device.createBuffer({
+        // its important to determine the write size of
+        // our uniform buffer. We use 64 bytes here because
+        // we have around 50 bytes worth of variables
+    size: 64,
+    usage: 
+        GPUBufferUsage.UNIFORM |
+        GPUBufferUsage.COPY_DST
+    })
+
+    // make an array buffer with 32 bytes
+    // this a javascript trick.
+    // uniform_floats and uniform_uints reference the same underlying array,
+    // which is uniform_data.
+    // However, modifying uniform_floats will give uniform_data a float32,
+    // and modifying uniform_uints will give uniform_data an uint32
+    uniform_data = new ArrayBuffer(64)
+    uniform_floats = new Float32Array(uniform_data)
+    uniform_uints = new Uint32Array(uniform_data)
+}
+function update_uniform_buffer(){
+    uniform_floats[0] = background_canvas.width
+    uniform_floats[1] = background_canvas.height
+
+    uniform_floats[2] = gravity
+    uniform_floats[3] = physics_delta_time
+
+    uniform_floats[4] = target_density
+    uniform_floats[5] = border_damping
+    uniform_floats[6] = air_damping
+
+    uniform_floats[7] = pressure_coefficient
+    uniform_floats[8] = viscosity_coefficient
+
+    uniform_floats[9] = density_influence_radius
+    uniform_floats[10] = pressure_influence_radius
+    uniform_floats[11] = viscosity_influence_radius
+
+    uniform_uints[12] = particle_amount
+
+    // write to the uniform buffer
+    device.queue.writeBuffer(
+        uniform_buffer, 0,
+        uniform_data
+    )
+}
+
+
+
+// this function is used as shorthand for the initialize_buffers_with_data() function
 function create_readback_buffer(source_buffer){
     // We want to get the values from the compute shader back into our javascript.
     // However, we can't map from a buffer the gpu is currently using.
@@ -481,14 +591,40 @@ function initialize_pipelines(){
                 entryPoint: "calculateViscosityAccelerations"
             }
         })
-    pipelines.Integrate =
+    pipelines.integrate =
         device.createComputePipeline({
             layout: "auto",
             compute: {
                 module: shader_module,
-                entryPoint: "Integrate"
+                entryPoint: "integrate"
             }
         })
+    
+    // render pipeline
+    gpu_render_pipeline = device.createRenderPipeline({
+        layout: "auto",
+        
+        // vertex shader for placing the particles
+        vertex: {
+            module: shader_module,
+            entryPoint: "vertex_main"
+        },
+
+        fragment: {
+            module: shader_module,
+            entryPoint: "fragment_main",
+            // defines the format of the output
+            targets: [{
+                format: gpu_canvas_format
+            }]
+        },
+
+        // this primitive thing just defines how the vertices are going to be assembled into geometry.
+        // this means every three vertices will form a triangle.
+        primitive: {
+            topology: "triangle-list"
+        }
+    })
 }
 
 // bind groups basically connect the pipelines to actual gpu buffers
@@ -501,11 +637,11 @@ function initialize_pipelines(){
 // for it to not scream at you. so weird dude.
 function initialize_bind_groups(){
     return {
+        // no for loop here because the variables we are using in each one
+        // will be different
+
         calculateDensity_bind_group: device.createBindGroup({
             layout: pipelines.density.getBindGroupLayout(0),
-            // not doing a for loop here because simply its important
-            // that these are in the same order as the bindings in
-            // fluidgpu.wgsl
             entries: [
                 {
                     binding: 0,
@@ -519,20 +655,52 @@ function initialize_bind_groups(){
         }),
         calculatePressures_bind_group: device.createBindGroup({
             layout: pipelines.pressure.getBindGroupLayout(0),
-            // not doing a for loop here because simply its important
-            // that these are in the same order as the bindings in
-            // fluidgpu.wgsl
             entries: [
                 {
                     binding: 0,
                     resource: { buffer: gpu_buffers.positions }
                 },
                 {
-                    binding: 4,
-                    resource: { buffer: gpu_buffers.densities }
+                    binding: 5,
+                    resource: { buffer: gpu_buffers.pressures }
                 }
             ]
-        }) 
+        }),
+
+
+        integrate_bind_group: device.createBindGroup({
+            layout: pipelines.integrate.getBindGroupLayout(0),
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: gpu_buffers.positions }
+                },
+                {
+                    binding: 1,
+                    resource: { buffer: gpu_buffers.velocities }
+                }
+            ]
+        }),
+
+        vertex_bind_group : device.createBindGroup({
+            layout: gpu_render_pipeline.getBindGroupLayout(0),
+            entries: [
+                {
+                    binding: 8,
+                    resource: { buffer: gpu_buffers.positions }
+                }
+            ]
+        }),
+
+        render_settings_bind_group: device.createBindGroup({
+            layout: gpu_render_pipeline.getBindGroupLayout(1),
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: uniform_buffer }
+                }
+            ]
+        }),
     }
 }
 
