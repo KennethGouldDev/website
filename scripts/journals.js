@@ -53,6 +53,9 @@ async function loadJournals(){
         const title = metadata.match(/^title:\s*(.+)$/m)?.[1] ?? "no title"
         const date = metadata.match(/^date:\s*(.+)$/m)?.[1] ?? "no date"
 
+        // get the character count
+        const characterCount = content.length
+
         // this is where dompurify and marked comes in,
         // we are gonna actually convert this to html!
         const html = DOMPurify.sanitize(marked.parse(content))
@@ -76,7 +79,11 @@ async function loadJournals(){
         titleElement.className = "journal-title"
         titleElement.textContent = title
 
-        summary.append(dateElement, titleElement)
+        const characterCountElement = document.createElement("span")
+        characterCountElement.className = "journal-character-count"
+        characterCountElement.textContent = `${characterCount} characters`
+
+        summary.append(dateElement, titleElement, characterCountElement)
 
         // same with the content of the entry
         const journalContent = document.createElement("div")
@@ -178,8 +185,8 @@ journals.forEach(journal =>{
 
 // lets make them appear one by one
 // you can not only get the element, you can get the index of the element as shown here
-const initialDelay = 1300;
-let staggerDelay = 800;
+const initialDelay = 800;
+let staggerDelay = 600;
 let staggerDelayMultiplier = 0.92
 
 journals.forEach((journal, index) => {
