@@ -1,7 +1,25 @@
 <!-- thought -->
 
+2026-11-18
+Today I've had a lot of hits of conciousness.. just moments of initially being lost in something, and then coming back and really noticing reality. Each time it happens I've really took note of the apparent tether between my mind and my vessel, and the tether between my mind and reality. At first I didn't really like this feeling, but I welcome it now! gonna write about it
+
+
+<!-- thought -->
+
+2026-11-18
+today i performed a silly song with my band at UNLV :)
+
+<!-- thought -->
+
+2026-11-18
+I've made great progress with converting the fluid sim into shader code!! im actually rendering stuff with the gpu and computing things now.
+So exciting!! I know the end product is gonna be great. <br> The projects page rn is prolly gonna look a little weird but let me cook
+
+<!-- thought -->
+
 2026-11-17
 Sit down and work through it
+
 
 <!-- thought -->
 
