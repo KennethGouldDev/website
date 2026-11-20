@@ -51,21 +51,9 @@ document.addEventListener("mouseup", () =>{
 
 // --------------------------------------------- FLUID SIM
 
-let particle_amount = 100
-
-// these are things that can change per particle.
-// We will put these in their own buffers
-let positions = [];
-let velocities = [];
-let densities = [];
-let pressures = []
-let pressure_accelerations = []
-let viscosity_accelerations = []
-let masses = [];
-let radii = [];
-
 // These are constants/parameters that *dont* change per particle.
 // These we will instead put into a uniform buffer
+
 let gravity = 500
 let target_density = 1
 let border_damping = 0.95
@@ -78,6 +66,24 @@ let viscosity_coefficient = 50
 let density_influence_radius = 60
 let pressure_influence_radius = 50
 let viscosity_influence_radius = 60
+
+let particle_radius = 10
+let particle_mass = 1
+
+let particle_amount = 250
+
+let mouse_influence_radius = 200
+let mouse_strength = 30
+
+// these are things that can change per particle.
+// We will put these in their own buffers
+let positions = [];
+let velocities = [];
+let densities = [];
+let pressures = []
+let pressure_accelerations = []
+let viscosity_accelerations = []
+
 
 // GPU!!!
 // ----------------------------------------------- INITIALIZE
@@ -116,11 +122,11 @@ let bind_groups = initialize_bind_groups()
 
 // ------------------------------------------------------ READBACK
 
-copy_gpu_data_to_readback()
-let data = await get_gpu_particle_data()
-// feed it back into the variables
-apply_gpu_particle_data(data)
-console.log(data.positions)
+// copy_gpu_data_to_readback()
+// let data = await get_gpu_particle_data()
+// // feed it back into the variables
+// apply_gpu_particle_data(data)
+// console.log(data.particle_amount)
 
 // ------------------------------------------------------ RENDER
 
@@ -182,7 +188,7 @@ function render_gpu(){
     // draw three vertices for each particle
     // the arguments are: Vertex count, Instance amount
     // so, draw particle_amount objects with 3 vertices
-    render_pass.draw(3, particle_amount)
+    render_pass.draw(6, particle_amount)
 
     render_pass.end()
 
@@ -203,7 +209,7 @@ async function render_on_cpu(){
     for (let i = 0; i < particle_amount; i++) {
         // draw circle
         ctx.beginPath();
-        ctx.arc(positions[i].x, positions[i].y, radii[i], 
+        ctx.arc(positions[i].x, positions[i].y, particle_radius, 
             0, 2 * Math.PI)
         ctx.fillStyle = "rgb(50, 50, 255)"
         ctx.fill()
@@ -216,8 +222,10 @@ async function render_on_cpu(){
 // PHYSICS PROCESS
 
 function physics_process(delta, time){
+    handle_grid()
     // update settings
     update_uniform_buffer()
+
 
     let workgroup_size = 64
 
@@ -226,20 +234,35 @@ function physics_process(delta, time){
     // begin the compute pass. This is where we give the commands
     const compute_pass = command_encoder.beginComputePass()
 
+    // instantiate grid
+    compute_pass.setPipeline(pipelines.instantiateGrid)
+    compute_pass.setBindGroup(0, instantiateGrid_bind_group)
+    compute_pass.setBindGroup(1, bind_groups.instantiateGrid_settings_bind_group)
+    // we want to clear every grid space, so we are actually gonna ask for
+    // grid_cell_amount as many invocations
+    compute_pass.dispatchWorkgroups(Math.ceil((grid_length_x * grid_length_y) / workgroup_size))
+
+    // do grid
+    compute_pass.setPipeline(pipelines.doGrid)
+    compute_pass.setBindGroup(0, doGrid_bind_group)
+    compute_pass.setBindGroup(1, bind_groups.doGrid_settings_bind_group)
+    compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
+
     // density
     compute_pass.setPipeline(pipelines.density)
     compute_pass.setBindGroup(0, bind_groups.calculateDensity_bind_group)
-    compute_pass.dispatchWorkgroups( Math.ceil(particle_amount / workgroup_size))
+    compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
 
     // pressure
     compute_pass.setPipeline(pipelines.pressure)
     compute_pass.setBindGroup(0, bind_groups.calculatePressures_bind_group)
-    compute_pass.dispatchWorkgroups( Math.ceil(particle_amount / workgroup_size))
+    compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
 
     // integrate
     compute_pass.setPipeline(pipelines.integrate)
     compute_pass.setBindGroup(0, bind_groups.integrate_bind_group)
-    compute_pass.dispatchWorkgroups( Math.ceil(particle_amount / workgroup_size))
+    compute_pass.setBindGroup(1, bind_groups.integrate_settings_bind_group)
+    compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
 
     compute_pass.end()
 
@@ -256,15 +279,17 @@ function create_particle_data(){
     for (let i = 0; i < particle_amount; i++){
         // spawn them in a grid formation
 
+        const position_variance = 10
+
         let pos_x = background_canvas.width/2
         let offset_x = -root/2
         offset_x += i % root
-        pos_x += offset_x * 20
+        pos_x += offset_x * position_variance
         pos_x += (Math.random() - 0.5) * 10
         let pos_y = background_canvas.height/2
         let offset_y = -root/2
         offset_y += Math.floor(i / root)
-        pos_y += offset_y * 20
+        pos_y += offset_y * position_variance
         pos_y += (Math.random() - 0.5) * 10
         positions.push({x: pos_x, y: pos_y})
         velocities.push({x: 0, y: 0})
@@ -272,13 +297,101 @@ function create_particle_data(){
         pressures.push(0)
         pressure_accelerations.push({x: 0, y: 0})
         viscosity_accelerations.push({x: 0, y: 0})
-        masses.push(1)
-        radii.push(10)
 
         // random velocity
         let rand_vel = 0
         velocities[i].x = randf_range(-rand_vel, rand_vel)
         velocities[i].y = randf_range(-rand_vel, rand_vel)
+    }
+}
+
+var instantiateGrid_bind_group
+var doGrid_bind_group
+var grid_cell_counts_buffer
+var grid_cell_indices_buffer
+
+var grid_cell_size = 0
+var grid_length_x = 0
+var grid_length_y = 0
+var grid_nested_length = particle_amount
+function handle_grid(){
+    // we need to do a lot to change the grid information.
+    // first of all, only do all this is the grid actually changed.
+    let new_grid_cell_size = Math.max(density_influence_radius, pressure_influence_radius, viscosity_influence_radius)
+    let new_grid_length_x = Math.ceil(background_canvas.width/new_grid_cell_size)
+    let new_grid_length_y = Math.ceil(background_canvas.height/new_grid_cell_size)
+
+    if (grid_cell_size != new_grid_cell_size || 
+        grid_length_x != new_grid_length_x ||
+        grid_length_y != new_grid_length_y)
+    {  
+        grid_cell_size = new_grid_cell_size
+        grid_length_x = new_grid_length_x
+        grid_length_y = new_grid_length_y
+        
+        // the grid changed. lets do our thing
+
+        // we need to change the length of the 
+        // gpu buffers grid arrays depending
+        // on what the new grid values are
+        let cell_count = grid_length_x * grid_length_y
+        let nested_length = particle_amount
+
+        // 4 bytes per u32 which is storing how many
+        // particles are in each cell (length of nested arrays)
+        const counts_buffer_size = cell_count * 4
+
+        // this one is gonna be as long as counts times how long each nested array is
+        const indices_buffer_size = cell_count * nested_length * 4
+
+        // first of all lets check to make sure this size value we just came up with
+        // isnt past the maximum size
+        if (indices_buffer_size > device.limits.maxStorageBufferBindingSize){
+            throw new Error("dude your indices buffer array became WAY too big!!")
+        }
+
+        // destroy the old buffers
+        // NOTE this **MIGHT** become a HUGE problem LMFAOAO
+        // (the question mark makes sure it exists before it destroys it)
+        grid_cell_counts_buffer?.destroy();
+        grid_cell_indices_buffer?.destroy();
+
+        // create the new buffers
+        grid_cell_counts_buffer = device.createBuffer({
+            size: counts_buffer_size,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+        grid_cell_indices_buffer = device.createBuffer({
+            size: indices_buffer_size,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+
+        // make the new bind groups
+        instantiateGrid_bind_group = device.createBindGroup({
+            layout: pipelines.instantiateGrid.getBindGroupLayout(0),
+            entries:[
+                {
+                    binding: 6,
+                    resource: { buffer: grid_cell_counts_buffer }
+                },
+            ]
+        })
+        doGrid_bind_group = device.createBindGroup({
+            layout: pipelines.doGrid.getBindGroupLayout(0),
+            entries:[
+                {
+                    binding: 6,
+                    resource: { buffer: grid_cell_counts_buffer }
+                },
+                {
+                    binding: 7,
+                    resource: { buffer: grid_cell_indices_buffer }
+                },
+                {
+                    binding: 0, resource: { buffer: gpu_buffers.positions }
+                }
+            ]
+        })
     }
 }
 
@@ -374,8 +487,6 @@ function initialize_buffers_with_data(){
     const velocity_data = convert_vector_array_to_packed(velocities)
     const pressure_acceleration_data = convert_vector_array_to_packed(pressure_accelerations)
     const viscosity_acceleration_data = convert_vector_array_to_packed(viscosity_accelerations)
-    const mass_data = new Float32Array(masses)
-    const radius_data = new Float32Array(radii)
     const density_data = new Float32Array(densities)
     const pressure_data = new Float32Array(pressures)
 
@@ -385,8 +496,6 @@ function initialize_buffers_with_data(){
         velocities: create_storage_buffer(velocity_data),
         pressure_accelerations: create_storage_buffer(pressure_acceleration_data),
         viscosity_accelerations: create_storage_buffer(viscosity_acceleration_data),
-        masses: create_storage_buffer(mass_data),
-        radii: create_storage_buffer(radius_data),
         densities: create_storage_buffer(density_data),
         pressures: create_storage_buffer(pressure_data),
     }
@@ -397,8 +506,6 @@ function initialize_buffers_with_data(){
         velocities: create_readback_buffer(gpu_buffers.velocities),
         pressure_accelerations: create_readback_buffer(gpu_buffers.pressure_accelerations),
         viscosity_accelerations: create_readback_buffer(gpu_buffers.viscosity_accelerations),
-        masses: create_readback_buffer(gpu_buffers.masses),
-        radii: create_readback_buffer(gpu_buffers.radii),
         densities: create_readback_buffer(gpu_buffers.densities),
         pressures: create_readback_buffer(gpu_buffers.pressures),
     }
@@ -410,7 +517,7 @@ function initialize_uniform_buffer(){
         // its important to determine the write size of
         // our uniform buffer. We use 64 bytes here because
         // we have around 50 bytes worth of variables
-    size: 64,
+    size: 128,
     usage: 
         GPUBufferUsage.UNIFORM |
         GPUBufferUsage.COPY_DST
@@ -422,10 +529,11 @@ function initialize_uniform_buffer(){
     // which is uniform_data.
     // However, modifying uniform_floats will give uniform_data a float32,
     // and modifying uniform_uints will give uniform_data an uint32
-    uniform_data = new ArrayBuffer(64)
+    uniform_data = new ArrayBuffer(128)
     uniform_floats = new Float32Array(uniform_data)
     uniform_uints = new Uint32Array(uniform_data)
 }
+
 function update_uniform_buffer(){
     uniform_floats[0] = background_canvas.width
     uniform_floats[1] = background_canvas.height
@@ -444,7 +552,28 @@ function update_uniform_buffer(){
     uniform_floats[10] = pressure_influence_radius
     uniform_floats[11] = viscosity_influence_radius
 
-    uniform_uints[12] = particle_amount
+    uniform_floats[12] = particle_radius
+    uniform_floats[13] = particle_mass
+
+    uniform_uints[14] = particle_amount
+
+    uniform_floats[15] = mouse.x
+    uniform_floats[16] = mouse.y
+    if (clicking == true){
+        uniform_uints[17] = 1
+    }
+    else{
+        uniform_uints[17] = 0
+    }
+    uniform_floats[18] = mouse_influence_radius
+    uniform_floats[19] = mouse_strength
+
+    // figure out how big the grid is gonna be
+    uniform_uints[20] = grid_cell_size
+    uniform_uints[21] = grid_length_x
+    uniform_uints[22] = grid_length_y
+    uniform_uints[23] = grid_nested_length
+
 
     // write to the uniform buffer
     device.queue.writeBuffer(
@@ -529,8 +658,6 @@ function apply_gpu_particle_data(data){
 
     densities = data.densities
     pressures = data.pressures
-    masses = data.masses
-    radii = data.radii
 }
 
 async function initialize_shaders(){
@@ -559,6 +686,22 @@ async function initialize_shaders(){
 // create the pipelines ( basically what code are we gonna be executing,
 // what commands do we actually wanna give to the gpu )
 function initialize_pipelines(){
+    pipelines.instantiateGrid =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "instantiateGrid"
+            }
+        }),
+    pipelines.doGrid =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "doGrid"
+            }
+        }),
     pipelines.density =
         device.createComputePipeline({
             layout: "auto",
@@ -637,9 +780,26 @@ function initialize_pipelines(){
 // for it to not scream at you. so weird dude.
 function initialize_bind_groups(){
     return {
-        // no for loop here because the variables we are using in each one
-        // will be different
+        // NOTE bind groups for the grid are done in a diff function
 
+        instantiateGrid_settings_bind_group: device.createBindGroup({
+            layout: pipelines.instantiateGrid.getBindGroupLayout(1),
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: uniform_buffer }
+                },
+            ]
+        }),
+        doGrid_settings_bind_group: device.createBindGroup({
+            layout: pipelines.doGrid.getBindGroupLayout(1),
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: uniform_buffer }
+                },
+            ]
+        }),
         calculateDensity_bind_group: device.createBindGroup({
             layout: pipelines.density.getBindGroupLayout(0),
             entries: [
@@ -678,6 +838,23 @@ function initialize_bind_groups(){
                 {
                     binding: 1,
                     resource: { buffer: gpu_buffers.velocities }
+                },
+                {
+                    binding: 2,
+                    resource: { buffer: gpu_buffers.pressure_accelerations }
+                },
+                {
+                    binding: 3,
+                    resource: { buffer: gpu_buffers.viscosity_accelerations }
+                },
+            ]
+        }),
+        integrate_settings_bind_group: device.createBindGroup({
+            layout: pipelines.integrate.getBindGroupLayout(1),
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: uniform_buffer }
                 }
             ]
         }),
@@ -688,7 +865,7 @@ function initialize_bind_groups(){
                 {
                     binding: 8,
                     resource: { buffer: gpu_buffers.positions }
-                }
+                },
             ]
         }),
 
@@ -698,7 +875,7 @@ function initialize_bind_groups(){
                 {
                     binding: 0,
                     resource: { buffer: uniform_buffer }
-                }
+                },
             ]
         }),
     }

@@ -1,5 +1,11 @@
 <!-- thought -->
 
+2026-11-19
+AHHH FIXED SIZED ARRAYS AHHH AGGHHH WHY WHY WHY
+
+
+<!-- thought -->
+
 2026-11-18
 Today I've had a lot of hits of conciousness.. just moments of initially being lost in something, and then coming back and really noticing reality. Each time it happens I've really took note of the apparent tether between my mind and my vessel, and the tether between my mind and reality. At first I didn't really like this feeling, but I welcome it now! gonna write about it
 
