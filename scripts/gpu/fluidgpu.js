@@ -55,25 +55,29 @@ document.addEventListener("mouseup", () =>{
 // These we will instead put into a uniform buffer
 
 let gravity = 1000
-let target_density = 0.0001
+let target_density = 0.01
 let border_damping = 0.95
 let air_damping = 0.995
 let physics_delta_time = 1.0/240.0;
 
-let pressure_coefficient = 800000
+let pressure_coefficient = 3000000
 let viscosity_coefficient = 5000
 
 let density_influence_radius = 10
-let pressure_influence_radius = 20
-let viscosity_influence_radius = 30
+let pressure_influence_radius = 15
+let viscosity_influence_radius = 20
 
-let particle_radius = 6
+let particle_radius = 5
 let particle_mass = 1
 
-let particle_amount = 10000
+let particle_amount = 4000
 
 let mouse_influence_radius = 200
 let mouse_strength = 80
+
+
+let spawn_random_variance = 5
+let spawn_position_variance = 5
 
 // these are things that can change per particle.
 // We will put these in their own buffers
@@ -302,18 +306,16 @@ function create_particle_data(){
     for (let i = 0; i < particle_amount; i++){
         // spawn them in a grid formation
 
-        const position_variance = 10
-
         let pos_x = background_canvas.width/2
         let offset_x = -root/2
         offset_x += i % root
-        pos_x += offset_x * position_variance
-        pos_x += (Math.random() - 0.5) * 10
+        pos_x += offset_x * spawn_position_variance
+        pos_x += (Math.random() - 0.5) * spawn_random_variance
         let pos_y = background_canvas.height/2
         let offset_y = -root/2
         offset_y += Math.floor(i / root)
-        pos_y += offset_y * position_variance
-        pos_y += (Math.random() - 0.5) * 10
+        pos_y += offset_y * spawn_position_variance
+        pos_y += (Math.random() - 0.5) * spawn_random_variance
         positions.push({x: pos_x, y: pos_y})
         velocities.push({x: 0, y: 0})
         densities.push(0)
@@ -1006,6 +1008,10 @@ function initialize_bind_groups(){
                 {
                     binding: 3,
                     resource: { buffer: gpu_buffers.viscosity_accelerations }
+                },
+                {
+                    binding: 9,
+                    resource: { buffer: particle_neighbors_buffer }
                 },
             ]
         }),

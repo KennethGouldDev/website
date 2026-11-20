@@ -1,5 +1,11 @@
 <!-- thought -->
 
+2026-11-20
+late at night
+
+
+<!-- thought -->
+
 2026-11-19
 OH MY GOD IT LOOKS SO COOL ALL THE TIME WAS WORTH IT!!
 

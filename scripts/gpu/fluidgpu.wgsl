@@ -294,6 +294,29 @@ fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
     positions[i].x += velocities[i].x * settings.physics_delta_time;
     positions[i].y += velocities[i].y * settings.physics_delta_time;
 
+    let min_distance = f32(settings.particle_radius);
+    // if inside of another particle, push out
+    // loop through all neighbors
+    for (var j = 0u; j < max_neighbors; j++){
+        let neighbor_i = particle_neighbors[i * max_neighbors + j];
+        // if invalid, out of neighbors, stop
+        if (neighbor_i == u32_limit) { break; }
+        // if looking at self, continue
+        if (i == neighbor_i) { continue; }
+
+        var to_neighbor = positions[neighbor_i] - positions[i];
+        let magnitude = distance(vec2f(0,0), to_neighbor);
+        // if too far dont push out
+        if (magnitude > min_distance) { continue; }
+        // if on top of eachother we gotta make a vector
+        if (magnitude == 0) 
+        { 
+            to_neighbor = vec2f(0,f32(i) * settings.physics_delta_time) * 0.1; 
+        }
+        // push out
+        positions[i] -= 0;
+    }
+
     // collide with borders
     // bottom
     if (positions[i].y + settings.particle_radius > settings.canvas_height){
@@ -357,7 +380,7 @@ fn vertex_main(
     var output : VertexOutput;
     output.position = vec4<f32>(clip_pos.x, clip_pos.y, 0.0, 1.0);
     output.local_position = offset;
-    output.color = vec4<f32>(0.1, 0.4, 1.0, 1.0);
+    output.color = vec4<f32>(0.1, 0.4, 0.8, 1.0);
     return output;
 }
 
@@ -378,9 +401,9 @@ fn fragment_main(input : VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     // stroke
-    else if (magnitude > radius - 2){
-        let c = input.color;
-        return vec4<f32>(c.r - 0.2, c.g - 0.2, c.b - 0.2, c.a - 0.2);
+    else if (magnitude > radius - 1){
+        const darker_by : f32 = 0.2;
+        return vec4<f32>(input.color.r - darker_by, input.color.g - darker_by, input.color.b - darker_by, input.color.a - darker_by);
     }
 
     return input.color;
