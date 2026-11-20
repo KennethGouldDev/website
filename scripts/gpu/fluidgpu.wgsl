@@ -49,6 +49,8 @@ var<storage, read_write> grid_cell_counts : array<atomic<u32>>;
 @group(0) @binding(7)
 var<storage, read_write> grid_cell_indices : array<u32>;
 
+@group(0) @binding(9)
+var<storage, read_write> particle_neighbors : array<u32>;
 
 
 // vertex shaders can only *read* storage buffers. So we make another binding
@@ -108,6 +110,8 @@ struct SimulationSettings {
     grid_nested_length : u32,
 }
 
+const max_neighbors : u32 = 500;
+
 
 @compute @workgroup_size(64)
 fn instantiateGrid( @builtin(global_invocation_id ) id: vec3<u32>){
@@ -133,11 +137,7 @@ fn doGrid( @builtin(global_invocation_id ) id: vec3<u32>){
     if (i >= settings.particle_amount) { return; }
     let position = positions[i];
 
-    // convert into grid coords
-    var grid_x = u32(floor(position.x / f32(settings.grid_cell_size)));
-    var grid_y = u32(floor(position.y / f32(settings.grid_cell_size)));
-    // put it in the right slot
-    let grid_i = grid_y * settings.grid_length_x + grid_x;
+    let grid_i = get_grid_cell_i_from_position(position);
 
     // atomiccc craziness
     // atomic add returns what the value USED to be
@@ -149,46 +149,113 @@ fn doGrid( @builtin(global_invocation_id ) id: vec3<u32>){
 }
 
 @compute @workgroup_size(64)
-fn calculateDensities( @builtin(global_invocation_id) id: vec3<u32>){
+fn calculateNeighbors( @builtin(global_invocation_id) id: vec3<u32>){
+    // here we are gonna calculate the neighbors of every particle
+    // store them in the particle_neighbors buffer
     let i = id.x;
+    if (i >= settings.particle_amount) { return; }
+
+    let neighbors = get_neighbor_particles(positions[i]);
+    for (var j = 0u; j < max_neighbors; j++){
+        particle_neighbors[i * max_neighbors + j] = neighbors[j];
+    }
+}
+
+@compute @workgroup_size(64)
+fn calculateDensities( @builtin(global_invocation_id) id: vec3<u32>){
+    let particle_i = id.x;
 
     // dont go past how many elements there are
-    if (i >= arrayLength(&densities)){ return; }
+    if (particle_i >= settings.particle_amount){ return; }
 
-    densities[i] = f32(i);
-
-    positions[i].y += 1;
+    // loop through neighbors
+    var new_density = 0f;
+    for (var j = 0u; j < max_neighbors; j++){
+        let neighbor_i = particle_neighbors[particle_i * max_neighbors + j];
+        // if invalid, out of neighbors, stop
+        if (neighbor_i == u32_limit) { break; }
+        let to_neighbor = positions[neighbor_i] - positions[particle_i];
+        let magnitude = distance(vec2f(0,0), to_neighbor);
+        // if not close enough, skip
+        if (magnitude > settings.density_influence_radius) { continue; }
+        new_density += settings.particle_mass * 
+            SPHpoly6(magnitude, settings.density_influence_radius);
+    }
+    densities[particle_i] = new_density;
 }
 
 @compute @workgroup_size(64)
 fn calculatePressures( @builtin(global_invocation_id) id: vec3<u32>){
-    let i = id.x;
+    let particle_i = id.x;
 
     // dont go past how many elements there are
-    if (i >= arrayLength(&pressures)){ return; }
+    if (particle_i >= settings.particle_amount){ return; }
 
-    positions[i].y += 0;
-
+    pressures[particle_i] = max(0,
+        settings.pressure_coefficient * (densities[particle_i] - settings.target_density));
 }
 
 @compute @workgroup_size(64)
 fn calculatePressureAccelerations( @builtin(global_invocation_id) id: vec3<u32>){
-    let i = id.x;
+    let particle_i = id.x;
 
     // dont go past how many elements there are
-    if (i >= arrayLength(&pressures)){ return; }
+    if (particle_i >= arrayLength(&pressures)){ return; }
 
-
-    
+    var pressure_acceleration = vec2f(0,0);
+    // loop through all neighbors
+    for (var j = 0u; j < max_neighbors; j++){
+        let neighbor_i = particle_neighbors[particle_i * max_neighbors + j];
+        // if invalid, out of neighbors, stop
+        if (neighbor_i == u32_limit) { break; }
+        let to_particle = positions[particle_i] - positions[neighbor_i];
+        let magnitude = distance(vec2f(0,0), to_particle);
+        // if not close enough or in the same spot, skip
+        if (magnitude == 0 || magnitude > settings.pressure_influence_radius) { continue; }
+        
+        // lot of neat math stuff here but im not gonna bother on
+        // commenting on a lot of it, for more information check out the cpu
+        // version of this, fluidsim.js
+        let gradient = SPHspikyGradient(to_particle, magnitude, settings.pressure_influence_radius);
+        let pressure_term = (pressures[particle_i] + pressures[neighbor_i]) /
+            (2 * densities[particle_i] * densities[neighbor_i]);
+        pressure_acceleration.x += -settings.particle_mass * pressure_term * gradient.x;
+        pressure_acceleration.y += -settings.particle_mass * pressure_term * gradient.y;
+    }
+    pressure_accelerations[particle_i].x = pressure_acceleration.x;
+    pressure_accelerations[particle_i].y = pressure_acceleration.y;
 }
 
 @compute @workgroup_size(64)
 fn calculateViscosityAccelerations( @builtin(global_invocation_id) id: vec3<u32>){
-    let i = id.x;
+    let particle_i = id.x;
 
     // dont go past how many elements there are
-    if (i >= arrayLength(&viscosity_accelerations)){ return; }
+    if (particle_i >= settings.particle_amount){ return; }
 
+    var viscosity_acceleration = vec2f(0,0);
+    // loop through all neighbors
+    for (var j = 0u; j < max_neighbors; j++){
+        let neighbor_i = particle_neighbors[particle_i * max_neighbors + j];
+        // if invalid, out of neighbors, stop
+        if (neighbor_i == u32_limit) { break; }
+
+        let to_neighbor = positions[neighbor_i] - positions[particle_i];
+        let magnitude = distance(vec2f(0,0), to_neighbor);
+        // skip if on top or too far
+        if (magnitude == 0 || magnitude >= settings.viscosity_influence_radius) { continue; }
+        // viscosity scalar
+        let laplacian = SPHlaplacian(magnitude, settings.viscosity_influence_radius);
+        let velocity_difference = velocities[neighbor_i] - velocities[particle_i];
+
+        let viscosity_term = settings.particle_mass / densities[neighbor_i] * laplacian;
+
+        // apply
+        viscosity_acceleration.x += settings.viscosity_coefficient * viscosity_term * velocity_difference.x;
+        viscosity_acceleration.y += settings.viscosity_coefficient * viscosity_term * velocity_difference.y;
+    }
+    // yay
+    viscosity_accelerations[particle_i] = viscosity_acceleration;
 }
 
 @compute @workgroup_size(64)
@@ -345,7 +412,9 @@ fn canvas_position_to_clip_position(canvas_position : vec2<f32>) -> vec2<f32> {
 // FUCK FUCK FUCK this cant return a runtime sized array. theyre all fixed!!
 // im just gonna leave this at 100. so, you can only get a maximum of 100 neighbor particles.
 // that shouldnt be too bad!
-fn get_neighbor_particles(position : vec2<f32>) -> array<u32, 100>{
+// NOTE NOTE make sure to adjust all the 100s all the way down if you
+// actually want to adjust that cap.
+fn get_neighbor_particles(position : vec2<f32>) -> array<u32, max_neighbors>{
     let grid_cell_i = get_grid_cell_i_from_position(position);
     let neighbor_grid_cells = get_3x3_grid_cell_indices(grid_cell_i);
     let particle_indices = get_particle_indices_inside_3x3_cells(neighbor_grid_cells);
@@ -353,20 +422,108 @@ fn get_neighbor_particles(position : vec2<f32>) -> array<u32, 100>{
 }
 
 fn get_grid_cell_i_from_position(position : vec2<f32>) -> u32{
-    let grid_x = u32(floor(position.x/f32(settings.grid_cell_size)));
-    let grid_y = u32(floor(position.y/f32(settings.grid_cell_size)));
-    return grid_y * settings.grid_length_x + grid_x;
+    let grid_x = i32(floor(position.x / f32(settings.grid_cell_size)));
+    let grid_y = i32(floor(position.y / f32(settings.grid_cell_size)));
+    // clamp
+    let clamped_x = clamp(grid_x, 0, i32(settings.grid_length_x) - 1);
+    let clamped_y = clamp(grid_y, 0, i32(settings.grid_length_y) - 1);
+    
+    return u32(clamped_y) * settings.grid_length_x + u32(clamped_x);
 }
 
+const u32_limit = 0xFFFFFFFFu;
 fn get_3x3_grid_cell_indices(grid_cell_i : u32) -> array<u32, 9>{
     var ret : array<u32, 9>;
+    // fill the array with the unsigned 32 bit integer limit
+    // this is just an easy way to say 4,294,967,295
+    for (var i = 0u; i < 9u; i++){
+        ret[i] = u32_limit;
+    }
+    // we do this because we need a way to know if a cell is invalid
+    // in js, id usually do something like if it's negative 1 its invalid,
+    // but here we are using unsigned ints! so instead we use the limit 
+    // (its the next best thing lol)
+
     let x = grid_cell_i % settings.grid_length_x;
     let y = grid_cell_i / settings.grid_length_x;
+    // remember these integer operations automatically floor
+
+    // Reading order
+
+    // check top
+    if (y > 0){
+        // top left
+        // check left
+        if (x > 0){
+            ret[0] = grid_cell_i - settings.grid_length_x - 1;
+        }
+        // top middle
+        ret[1] = grid_cell_i - settings.grid_length_x;
+        // top right
+        // check right
+        if (x < settings.grid_length_x - 1){
+            ret[2] = grid_cell_i - settings.grid_length_x + 1;
+        }
+    }
+
+    // now middle
+
+    // middle left
+    // check left
+    if (x > 0){
+        ret[3] = grid_cell_i - 1;
+    }
+    // very middle
+    ret[4] = grid_cell_i;
+    // middle right
+    // check right
+    if (x < settings.grid_length_x - 1){
+        ret[5] = grid_cell_i + 1;
+    }
+
+    // now bottom
+    // check bottom
+    if (y < settings.grid_length_y - 1){
+        // bottom left left
+        // check left
+        if (x > 0){
+            ret[6] = grid_cell_i + settings.grid_length_x - 1;
+        }
+        // bottom middle
+        ret[7] = grid_cell_i + settings.grid_length_x;
+        // bottom right
+        // check right
+        if (x < settings.grid_length_x - 1){
+            ret[8] = grid_cell_i + settings.grid_length_x + 1;
+        }
+    }
+
     return ret;
 }
 
-fn get_particle_indices_inside_3x3_cells(grid_cells : array<u32, 9>) -> array<u32, 100>{
-    var ret : array<u32, 100>;
+fn get_particle_indices_inside_3x3_cells(grid_cells : array<u32, 9>) -> array<u32, max_neighbors>{
+    var ret : array<u32, max_neighbors>;
+    // fill ret with invalid indices
+    for (var i = 0u; i < max_neighbors; i++){
+        ret[i] = u32_limit;
+    }
+
+    var ret_i = 0u;
+    for (var i = 0u; i < 9u; i++){
+        let grid_i = grid_cells[i];
+        // check if invalid
+        if (grid_i == u32_limit) { continue; }
+
+        let indices_nested_i = grid_i * settings.grid_nested_length;
+        let nested_length = atomicLoad(&grid_cell_counts[grid_i]);
+        for (var j = 0u; j < nested_length; j++){
+            // dont exceed capacity
+            if (ret_i >= max_neighbors) { break; }
+            ret[ret_i] = grid_cell_indices[indices_nested_i + j];
+            ret_i++;
+        }
+        if (ret_i >= max_neighbors) { break; }
+    }
     return ret;
 }
 
@@ -376,7 +533,7 @@ fn get_particle_indices_inside_3x3_cells(grid_cells : array<u32, 9>) -> array<u3
 const PI : f32 = 3.141592653589793;
 
 // returns a scalar, mostly used for density
-fn SPHpoly6Gradient(distance : f32, smoothing_radius : f32) -> f32{
+fn SPHpoly6(distance : f32, smoothing_radius : f32) -> f32{
     if (distance > smoothing_radius) { return 0.0; }
     let difference = smoothing_radius * smoothing_radius - distance * distance;
     return (4 / (PI * pow(smoothing_radius, 8))) * pow(difference, 3);
