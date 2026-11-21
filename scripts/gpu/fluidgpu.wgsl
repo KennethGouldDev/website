@@ -53,10 +53,14 @@ var<storage, read_write> grid_cell_indices : array<u32>;
 var<storage, read_write> particle_neighbors : array<u32>;
 
 
-// vertex shaders can only *read* storage buffers. So we make another binding
-@group(0) @binding(8)
-var<storage, read> render_positions: array<vec2<f32>>;
+// vertex shaders can only *read* storage buffers. So we make another binding for purely reading
+@group(2) @binding(0)
+var<storage, read> read_positions: array<vec2<f32>>;
+@group(2) @binding(1)
+var<storage, read> read_velocities: array<vec2<f32>>;
 
+@group(2) @binding(4)
+var<storage, read> read_densities: array<f32>;
 
 // thats enough of the storage buffers. Remember we got these storage buffers simply because
 // we need to write to them.
@@ -108,6 +112,10 @@ struct SimulationSettings {
     grid_length_x : u32,
     grid_length_y : u32,
     grid_nested_length : u32,
+
+    // coloring
+    color_mode : u32,
+    color_sensitivity : f32,
 }
 
 const max_neighbors : u32 = 500;
@@ -144,6 +152,7 @@ fn doGrid( @builtin(global_invocation_id ) id: vec3<u32>){
     // so this slot value is actually the index of what we want to override,
     // while it simultaneously increments the grid cell counts element!
     let slot = atomicAdd(&grid_cell_counts[grid_i], 1u);
+    if (slot >= settings.grid_nested_length) { return; }
     // put particle index in the right slot
     grid_cell_indices[grid_i * settings.grid_nested_length + slot] = i;
 }
@@ -200,7 +209,7 @@ fn calculatePressureAccelerations( @builtin(global_invocation_id) id: vec3<u32>)
     let particle_i = id.x;
 
     // dont go past how many elements there are
-    if (particle_i >= arrayLength(&pressures)){ return; }
+    if (particle_i >= settings.particle_amount){ return; }
 
     var pressure_acceleration = vec2f(0,0);
     // loop through all neighbors
@@ -314,7 +323,9 @@ fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
             to_neighbor = vec2f(0,f32(i) * settings.physics_delta_time) * 0.1; 
         }
         // push out
-        positions[i] -= 0;
+        // figuring this out another time.
+        // NOTE just realized i cant do it here because of race conditions modifying the positions var
+        // im gonna have to make a buffer for this specifically etc.
     }
 
     // collide with borders
@@ -360,7 +371,7 @@ fn vertex_main(
     @builtin(instance_index) instance_index: u32
 ) -> VertexOutput {
 
-    var position = render_positions[instance_index];
+    var position = read_positions[instance_index];
     let offsets = array<vec2<f32>, 6>(
         // top right corner triangle
         vec2<f32>( settings.particle_radius, -settings.particle_radius),
@@ -380,7 +391,36 @@ fn vertex_main(
     var output : VertexOutput;
     output.position = vec4<f32>(clip_pos.x, clip_pos.y, 0.0, 1.0);
     output.local_position = offset;
-    output.color = vec4<f32>(0.1, 0.4, 0.8, 1.0);
+
+    // coloring
+    if (settings.color_mode == 0){
+        // velocity
+        var velocity = read_velocities[instance_index];
+        var velocity_magnitude = distance(vec2f(0,0), velocity);
+        // for the color, interpolate from blue to green to red
+        let color_a = vec4<f32>(0,0.2,1,1); // blue
+        let color_b = vec4<f32>(0,0.8,0.2,1); // green
+        let color_c = vec4<f32>(1,0,0,1); // red
+        let t = clamp(velocity_magnitude/1000 * settings.color_sensitivity, 0, 1);
+        let blend_term = mix(color_a, color_b, t * 2.0);
+        let blend = mix(blend_term, color_c, t * 2.0 - 1.0);
+        output.color = blend;
+    }
+    else if (settings.color_mode == 1){
+        // density
+        var density = read_densities[instance_index];
+        // for the color, interpolate from blue to green to red
+        let color_a = vec4<f32>(0,0.6,1,1); // blue
+        let color_b = vec4<f32>(0,0.1,1,1); // green
+        let color_c = vec4<f32>(1,0,0.3,1); // red
+        let t = clamp(density * 50 * settings.color_sensitivity, 0, 10);
+        let blend_term = mix(color_a, color_b, t * 2.0);
+        let blend = mix(blend_term, color_c, t * 2.0 - 1.0);
+        output.color = blend;
+    }
+    else{
+        output.color = vec4<f32>(0,0.2,1,1);
+    }
     return output;
 }
 
@@ -403,7 +443,7 @@ fn fragment_main(input : VertexOutput) -> @location(0) vec4<f32> {
     // stroke
     else if (magnitude > radius - 1){
         const darker_by : f32 = 0.2;
-        return vec4<f32>(input.color.r - darker_by, input.color.g - darker_by, input.color.b - darker_by, input.color.a - darker_by);
+        return vec4<f32>(input.color.r - darker_by, input.color.g - darker_by, input.color.b - darker_by, input.color.a);
     }
 
     return input.color;

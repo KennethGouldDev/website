@@ -55,25 +55,30 @@ document.addEventListener("mouseup", () =>{
 // These we will instead put into a uniform buffer
 
 let gravity = 1000
-let target_density = 0.01
+let target_density = 0.003
 let border_damping = 0.95
 let air_damping = 0.995
 let physics_delta_time = 1.0/240.0;
 
-let pressure_coefficient = 3000000
+let pressure_coefficient = 1000000
 let viscosity_coefficient = 5000
 
-let density_influence_radius = 10
+let density_influence_radius = 20
 let pressure_influence_radius = 15
 let viscosity_influence_radius = 20
 
 let particle_radius = 5
 let particle_mass = 1
 
-let particle_amount = 4000
+let particle_amount = 10000
 
-let mouse_influence_radius = 200
-let mouse_strength = 80
+let mouse_influence_radius = 150
+let mouse_strength = 70
+
+let color_mode = 0;
+let color_sensitivity = 1;
+// 0 = velocity
+// 1 = density
 
 
 let spawn_random_variance = 5
@@ -189,7 +194,7 @@ function render_gpu(){
     })
 
     render_pass.setPipeline(gpu_render_pipeline)
-    render_pass.setBindGroup(0, bind_groups.vertex_bind_group)
+    render_pass.setBindGroup(2, bind_groups.vertex_bind_group)
     render_pass.setBindGroup(1, bind_groups.render_settings_bind_group)
     // draw three vertices for each particle
     // the arguments are: Vertex count, Instance amount
@@ -199,30 +204,6 @@ function render_gpu(){
     render_pass.end()
 
     device.queue.submit([command_encoder.finish()])
-}
-
-// this is more of a debug function that renders all the particles
-// with the cpu
-async function render_on_cpu(){
-    copy_gpu_data_to_readback()
-    let data = await get_gpu_particle_data()
-    apply_gpu_particle_data(data)
-
-    // clear previous frame
-    ctx.clearRect(0,0, background_canvas.width, background_canvas.height)
-
-    // draw particles
-    for (let i = 0; i < particle_amount; i++) {
-        // draw circle
-        ctx.beginPath();
-        ctx.arc(positions[i].x, positions[i].y, particle_radius, 
-            0, 2 * Math.PI)
-        ctx.fillStyle = "rgb(50, 50, 255)"
-        ctx.fill()
-        ctx.strokeStyle = "rgba(50,50,150,0.8)"
-        ctx.lineWidth = 4;
-        ctx.stroke();
-    }
 }
 
 // PHYSICS PROCESS
@@ -339,7 +320,7 @@ var grid_cell_indices_buffer
 var grid_cell_size = 0
 var grid_length_x = 0
 var grid_length_y = 0
-var grid_nested_length = particle_amount
+var grid_nested_length = 100
 function handle_grid(){
     // we need to do a lot to change the grid information.
     // first of all, only do all this is the grid actually changed.
@@ -618,6 +599,9 @@ function update_uniform_buffer(){
     uniform_uints[21] = grid_length_x
     uniform_uints[22] = grid_length_y
     uniform_uints[23] = grid_nested_length
+
+    uniform_uints[24] = color_mode
+    uniform_floats[25] = color_sensitivity
 
 
     // write to the uniform buffer
@@ -1026,11 +1010,19 @@ function initialize_bind_groups(){
         }),
 
         vertex_bind_group : device.createBindGroup({
-            layout: gpu_render_pipeline.getBindGroupLayout(0),
+            layout: gpu_render_pipeline.getBindGroupLayout(2),
             entries: [
                 {
-                    binding: 8,
+                    binding: 0,
                     resource: { buffer: gpu_buffers.positions }
+                },
+                {
+                    binding: 1,
+                    resource: { buffer: gpu_buffers.velocities }
+                },
+                {
+                    binding: 4,
+                    resource: { buffer: gpu_buffers.densities }
                 },
             ]
         }),
