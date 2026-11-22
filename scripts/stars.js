@@ -9,22 +9,6 @@ window.addEventListener("mousemove", (event) => {
     mouse.y = event.clientY;
 })
 
-
-// make it so the background canvas resizes whenever the window gets resized
-window.addEventListener("resize", () =>{
-    let width_delta = window.innerWidth - background_canvas.width
-    let height_delta = window.innerHeight - background_canvas.height
-    background_canvas.width = window.innerWidth;
-    background_canvas.height = window.innerHeight;
-
-    // adjust star position
-    stars.forEach(star => {
-        let star_speed = star.speed * .1 * star.size
-        star.x += width_delta * (star.x/background_canvas.width)
-        star.y += height_delta * (star.x/background_canvas.width)
-    });
-})
-
 // get if the mouse is clicked
 let clicking = false
 
@@ -82,7 +66,7 @@ let physics_accumulate = 0;
 const physics_delta = 1.0/60.0;
 
 requestAnimationFrame(animate)
-function animate(timestamp){
+function animate(timestamp){    
     // requestAnimationFrame doesnt give deltatime, instead it gives a timestamp.
     // with this, we can calculate deltatime though.
     // NOTE timestamp is in milliseconds, thats why we divide by 1000 here
@@ -101,6 +85,8 @@ function animate(timestamp){
         physics_accumulate -= physics_delta
         physics_process(physics_delta, time)
     }
+
+    handle_canvas_changing()
 
     // draw stars
 
@@ -171,6 +157,28 @@ function animate(timestamp){
     prev_mouse.x = mouse.x
     prev_mouse.y = mouse.y
     requestAnimationFrame(animate)
+}
+
+let prev_width = 0
+let prev_height = 0
+function handle_canvas_changing(){
+    if (window.innerWidth == prev_width && 
+        window.innerHeight == prev_height) {return}
+
+    prev_width = window.innerWidth
+    prev_height = window.innerHeight
+
+    let width_delta = window.innerWidth - background_canvas.width
+    let height_delta = window.innerHeight - background_canvas.height
+    background_canvas.width = window.innerWidth;
+    background_canvas.height = window.innerHeight;
+
+    // adjust star position
+    stars.forEach(star => {
+        let star_speed = star.speed * .1 * star.size
+        star.x += width_delta * (star.x/background_canvas.width)
+        star.y += height_delta * (star.x/background_canvas.width)
+    });
 }
 
 function randf_range(a, b){
