@@ -7,20 +7,6 @@ const ctx = background_canvas.getContext("2d");
 background_canvas.width = window.innerWidth;
 background_canvas.height = window.innerHeight;
 
-// make it so the background canvas resizes whenever the window gets resized
-window.addEventListener("resize", () =>{
-    let width_delta = window.innerWidth - background_canvas.width
-    let height_delta = window.innerHeight - background_canvas.height
-    background_canvas.width = window.innerWidth;
-    background_canvas.height = window.innerHeight;
-
-    // adjust boid position
-    boids.forEach(boid => {
-        boid.x += width_delta * (boid.x/background_canvas.width)
-        boid.y += height_delta * (boid.x/background_canvas.width)
-    });
-})
-
 // track mouse
 let mouse = {
     x: 0,
@@ -74,6 +60,8 @@ function animate(timestamp){
         physics_process(physics_delta, time)
     }
 
+    handle_canvas_changing()
+
     // clear previous frame
     ctx.clearRect(0,0, background_canvas.width, background_canvas.height)
 
@@ -110,6 +98,27 @@ function animate(timestamp){
 
     prev_time = timestamp
     requestAnimationFrame(animate)
+}
+
+let prev_width = 0
+let prev_height = 0
+function handle_canvas_changing(){
+    if (window.innerWidth == prev_width && 
+        window.innerHeight == prev_height) {return}
+
+    prev_width = window.innerWidth
+    prev_height = window.innerHeight
+
+    let width_delta = window.innerWidth - background_canvas.width
+    let height_delta = window.innerHeight - background_canvas.height
+    background_canvas.width = window.innerWidth;
+    background_canvas.height = window.innerHeight;
+
+    // adjust star position
+    boids.forEach(boid => {
+        boid.x += width_delta * (boid.x/background_canvas.width)
+        boid.y += height_delta * (boid.x/background_canvas.width)
+    });
 }
 
 let boid_spawn_interval = 0.4
