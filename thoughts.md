@@ -1,5 +1,11 @@
 <!-- thought -->
 
+2026-11-21
+SHOUT OUTS to the UNIVERSITY of ILLINOIS!!!!!
+
+
+<!-- thought -->
+
 2026-11-20
 Relish the breakdown
 

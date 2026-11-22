@@ -70,7 +70,7 @@ let viscosity_influence_radius = 20
 let particle_radius = 5
 let particle_mass = 1
 
-let particle_amount = 10000
+let particle_amount = 7000
 
 let mouse_influence_radius = 150
 let mouse_strength = 70
