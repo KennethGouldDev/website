@@ -17,18 +17,6 @@ let gpu_render_pipeline
 background_canvas.width = window.innerWidth;
 background_canvas.height = window.innerHeight;
 
-// make it so the background canvas resizes whenever the window gets resized
-window.addEventListener("resize", () =>{
-    let width_delta = window.innerWidth - background_canvas.width
-    let height_delta = window.innerHeight - background_canvas.height
-    background_canvas.width = window.innerWidth;
-    background_canvas.height = window.innerHeight;
-
-    // TODO we should  update the particle positions
-    // when we resize the window. We need to do that on
-    // gpu tho.
-})
-
 // track mouse
 let mouse = {
     x: 0,
@@ -58,22 +46,24 @@ let gravity = 1000
 let target_density = 0.003
 let border_damping = 0.95
 let air_damping = 0.995
-let physics_delta_time = 1.0/240.0;
+let physics_max_steps_per_frame = 40;
+let physics_delta_time = 1.0/480.0;
 
-let pressure_coefficient = 1000000
-let viscosity_coefficient = 5000
+let pressure_coefficient = 2000000
+let viscosity_coefficient = 8000
 
 let density_influence_radius = 20
-let pressure_influence_radius = 15
+let pressure_influence_radius = 12
 let viscosity_influence_radius = 20
 
-let particle_radius = 5
+let particle_radius = 4
 let particle_mass = 1
+let particle_min_distance = 4
 
-let particle_amount = 7000
+let particle_amount = 10000
 
 let mouse_influence_radius = 150
-let mouse_strength = 70
+let mouse_strength = 100
 
 let color_mode = 0;
 let color_sensitivity = 1;
@@ -158,10 +148,9 @@ function animate(timestamp){
     // some trickery to make sure it runs at a fixed timestep
     physics_accumulate += delta
     while (physics_accumulate > physics_delta_time) {
-        if (physics_accumulate > physics_delta_time * 10){
+        if (physics_accumulate > physics_delta_time * physics_max_steps_per_frame){
             // dont make it execute more than ten times in one frame
-            physics_accumulate = 0
-            break
+            physics_accumulate = physics_delta_time * physics_max_steps_per_frame
         }
         physics_accumulate -= physics_delta_time
         physics_process(physics_delta_time, time)
@@ -209,6 +198,7 @@ function render_gpu(){
 // PHYSICS PROCESS
 
 function physics_process(delta, time){
+    handle_canvas_changing()
     handle_grid()
     // update settings
     update_uniform_buffer()
@@ -233,6 +223,16 @@ function physics_process(delta, time){
     compute_pass.setPipeline(pipelines.doGrid)
     compute_pass.setBindGroup(0, doGrid_bind_group)
     compute_pass.setBindGroup(1, bind_groups.doGrid_settings_bind_group)
+    compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
+
+    compute_pass.setPipeline(pipelines.doGridStarts)
+    compute_pass.setBindGroup(0, doGridStarts_bind_group)
+    compute_pass.setBindGroup(1, bind_groups.doGridStarts_settings_bind_group)
+    compute_pass.dispatchWorkgroups(1)
+
+    compute_pass.setPipeline(pipelines.gridPlaceParticles)
+    compute_pass.setBindGroup(0, gridPlaceParticles_bind_group)
+    compute_pass.setBindGroup(1, bind_groups.gridPlaceParticles_settings_bind_group)
     compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
 
     // calculate neighbors
@@ -264,6 +264,12 @@ function physics_process(delta, time){
     compute_pass.setPipeline(pipelines.viscosityAccelerations)
     compute_pass.setBindGroup(0, bind_groups.calculateViscosityAccelerations_bind_group)
     compute_pass.setBindGroup(1, bind_groups.calculateViscosityAccelerations_settings_bind_group)
+    compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
+
+    // position corrections
+    compute_pass.setPipeline(pipelines.calculatePositionCorrections)
+    compute_pass.setBindGroup(0, bind_groups.calculatePositionCorrections)
+    compute_pass.setBindGroup(1, bind_groups.calculatePositionCorrections_settings_bind_group)
     compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
 
     // integrate
@@ -313,20 +319,42 @@ function create_particle_data(){
 
 var instantiateGrid_bind_group
 var doGrid_bind_group
+var doGridStarts_bind_group
+var gridPlaceParticles_bind_group
 var calculateNeighbors_bind_group
 var grid_cell_counts_buffer
+var grid_cell_starts_buffer
 var grid_cell_indices_buffer
+var particle_slots_buffer
 
 var grid_cell_size = 0
 var grid_length_x = 0
 var grid_length_y = 0
-var grid_nested_length = 100
+var grid_nested_length = 100 // this is unused but to remove it would mean
+// shifting the whole uniform buffer down which ahhhhh whatever
 function handle_grid(){
     // we need to do a lot to change the grid information.
     // first of all, only do all this is the grid actually changed.
     let new_grid_cell_size = Math.max(density_influence_radius, pressure_influence_radius, viscosity_influence_radius)
     let new_grid_length_x = Math.ceil(background_canvas.width/new_grid_cell_size)
     let new_grid_length_y = Math.ceil(background_canvas.height/new_grid_cell_size)
+
+    // we only make the particle slots and grid cell indices buffer once
+    // because their size never changes, it's dependent on the particle size.
+    // make them if they dont exist
+    if (!grid_cell_indices_buffer){
+        grid_cell_indices_buffer = device.createBuffer({
+            size: particle_amount * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+    }
+    if (!particle_slots_buffer){
+        particle_slots_buffer = device.createBuffer({
+            size: particle_amount * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+    }
+
 
     if (grid_cell_size != new_grid_cell_size || 
         grid_length_x != new_grid_length_x ||
@@ -341,35 +369,23 @@ function handle_grid(){
         // we need to change the length of the 
         // gpu buffers grid arrays depending
         // on what the new grid values are
-        let cell_count = grid_length_x * grid_length_y
-        let nested_length = particle_amount
+        const cell_count = grid_length_x * grid_length_y
 
-        // 4 bytes per u32 which is storing how many
-        // particles are in each cell (length of nested arrays)
-        const counts_buffer_size = cell_count * 4
-
-        // this one is gonna be as long as counts times how long each nested array is
-        const indices_buffer_size = cell_count * nested_length * 4
-
-        // first of all lets check to make sure this size value we just came up with
-        // isnt past the maximum size
-        if (indices_buffer_size > device.limits.maxStorageBufferBindingSize){
-            throw new Error("dude your indices buffer array became WAY too big!!")
-        }
+        // we DO need to remake these two buffers because they DO change
+        // in size whenever the grid changes.
 
         // destroy the old buffers
         // NOTE this **MIGHT** become a HUGE problem LMFAOAO
         // (the question mark makes sure it exists before it destroys it)
         grid_cell_counts_buffer?.destroy();
-        grid_cell_indices_buffer?.destroy();
-
+        grid_cell_starts_buffer?.destroy();
         // create the new buffers
         grid_cell_counts_buffer = device.createBuffer({
-            size: counts_buffer_size,
+            size: cell_count * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         });
-        grid_cell_indices_buffer = device.createBuffer({
-            size: indices_buffer_size,
+        grid_cell_starts_buffer = device.createBuffer({
+            size: cell_count * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         });
 
@@ -377,48 +393,62 @@ function handle_grid(){
         instantiateGrid_bind_group = device.createBindGroup({
             layout: pipelines.instantiateGrid.getBindGroupLayout(0),
             entries:[
-                {
-                    binding: 6,
-                    resource: { buffer: grid_cell_counts_buffer }
-                },
+                { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
             ]
         })
         doGrid_bind_group = device.createBindGroup({
             layout: pipelines.doGrid.getBindGroupLayout(0),
             entries:[
-                {
-                    binding: 6,
-                    resource: { buffer: grid_cell_counts_buffer }
-                },
-                {
-                    binding: 7,
-                    resource: { buffer: grid_cell_indices_buffer }
-                },
-                {
-                    binding: 0, resource: { buffer: gpu_buffers.positions }
-                }
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
+                { binding: 10, resource: { buffer: particle_slots_buffer } },
+            ]
+        })
+        doGridStarts_bind_group = device.createBindGroup({
+            layout: pipelines.doGridStarts.getBindGroupLayout(0),
+            entries:[
+                { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
+                { binding: 8, resource: { buffer: grid_cell_starts_buffer } },
+            ]
+        })
+        gridPlaceParticles_bind_group = device.createBindGroup({
+            layout: pipelines.gridPlaceParticles.getBindGroupLayout(0),
+            entries:[
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 7, resource: { buffer: grid_cell_indices_buffer } },
+                { binding: 8, resource: { buffer: grid_cell_starts_buffer } },
+                { binding: 10, resource: { buffer: particle_slots_buffer } },
             ]
         })
         calculateNeighbors_bind_group = device.createBindGroup({
             layout: pipelines.calculateNeighbors.getBindGroupLayout(0),
             entries:[
-                {
-                    binding: 6,
-                    resource: { buffer: grid_cell_counts_buffer }
-                },
-                {
-                    binding: 7,
-                    resource: { buffer: grid_cell_indices_buffer }
-                },
-                {
-                    binding: 0, resource: { buffer: gpu_buffers.positions }
-                },
-                {
-                    binding: 9, resource: { buffer: particle_neighbors_buffer }
-                },
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
+                { binding: 7, resource: { buffer: grid_cell_indices_buffer } },
+                { binding: 8, resource: { buffer: grid_cell_starts_buffer } },
+                { binding: 9, resource: { buffer: particle_neighbors_buffer } },
             ]
         })
     }
+}
+
+let window_width_delta
+let window_height_delta
+let prev_window_width = window.innerWidth
+let prev_window_height = window.innerHeight
+function handle_canvas_changing(){
+    if (window.innerWidth == prev_window_width && 
+        window.innerHeight == prev_window_height
+    ) { return; }
+
+    prev_window_width = window.innerWidth
+    prev_window_height = window.innerHeight
+
+    window_width_delta = window.innerWidth - background_canvas.width
+    window_height_delta = window.innerHeight - background_canvas.height
+    background_canvas.width = window.innerWidth;
+    background_canvas.height = window.innerHeight;
 }
 
 function randf_range(a, b){
@@ -524,6 +554,9 @@ function initialize_buffers_with_data(){
         viscosity_accelerations: create_storage_buffer(viscosity_acceleration_data),
         densities: create_storage_buffer(density_data),
         pressures: create_storage_buffer(pressure_data),
+        // * 2 because two floats per particle (vec2)
+        // this will automatically make it all zeroes
+        position_corrections: create_storage_buffer(new Float32Array(particle_amount * 2))
     }
 
     // create the readback buffers!
@@ -603,18 +636,24 @@ function update_uniform_buffer(){
     uniform_uints[24] = color_mode
     uniform_floats[25] = color_sensitivity
 
+    uniform_floats[26] = particle_min_distance
 
     // write to the uniform buffer
     device.queue.writeBuffer(
         uniform_buffer, 0,
         uniform_data
     )
+
+    // reset this so that the gpu only gets the deltas
+    // for one physics step
+    window_width_delta = 0
+    window_height_delta = 0
 }
 
 function initialize_particle_neighbors_buffer(){
     // MAKE SURE NOTE NOTE MAKE SURE
     // this lines up with the max_neighbors constant in fluidgpu.wgsl
-    const max_neighbors = 500
+    const max_neighbors = 100
     particle_neighbors_buffer = device.createBuffer({
         size: particle_amount * max_neighbors * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
@@ -740,6 +779,22 @@ function initialize_pipelines(){
                 entryPoint: "doGrid"
             }
         }),
+    pipelines.doGridStarts =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "doGridStarts"
+            }
+        }),
+    pipelines.gridPlaceParticles =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "gridPlaceParticles"
+            }
+        }),
     pipelines.calculateNeighbors =
         device.createComputePipeline({
             layout: "auto",
@@ -778,6 +833,14 @@ function initialize_pipelines(){
             compute: {
                 module: shader_module,
                 entryPoint: "calculateViscosityAccelerations"
+            }
+        })
+    pipelines.calculatePositionCorrections =
+        device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: shader_module,
+                entryPoint: "calculatePositionCorrections"
             }
         })
     pipelines.integrate =
@@ -831,21 +894,25 @@ function initialize_bind_groups(){
         instantiateGrid_settings_bind_group: device.createBindGroup({
             layout: pipelines.instantiateGrid.getBindGroupLayout(1),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
+                { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
         doGrid_settings_bind_group: device.createBindGroup({
             layout: pipelines.doGrid.getBindGroupLayout(1),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
+                { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
+        doGridStarts_settings_bind_group: device.createBindGroup({
+            layout: pipelines.doGridStarts.getBindGroupLayout(1),
+            entries: [
+                { binding: 0, resource: { buffer: uniform_buffer } },
+            ]}),
+        gridPlaceParticles_settings_bind_group: device.createBindGroup({
+            layout: pipelines.gridPlaceParticles.getBindGroupLayout(1),
+            entries: [
+                { binding: 0, resource: { buffer: uniform_buffer } },
+            ]}),
         calculateNeighbors_settings_bind_group: device.createBindGroup({
             layout: pipelines.calculateNeighbors.getBindGroupLayout(1),
             entries: [
@@ -858,36 +925,21 @@ function initialize_bind_groups(){
         calculateDensities_bind_group: device.createBindGroup({
             layout: pipelines.density.getBindGroupLayout(0),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: gpu_buffers.positions }
-                },
-                {
-                    binding: 4,
-                    resource: { buffer: gpu_buffers.densities }
-                }, 
-                {
-                    binding: 9,
-                    resource: { buffer: particle_neighbors_buffer }
-                },                        
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
+                { binding: 9, resource: { buffer: particle_neighbors_buffer } },                        
             ]
         }),
         calculateDensities_settings_bind_group: device.createBindGroup({
             layout: pipelines.density.getBindGroupLayout(1),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
+                { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
         calculatePressures_bind_group: device.createBindGroup({
             layout: pipelines.pressure.getBindGroupLayout(0),
             entries: [
-                {
-                    binding: 4,
-                    resource: { buffer: gpu_buffers.densities }
-                }, 
+                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
                 {
                     binding: 5,
                     resource: { buffer: gpu_buffers.pressures }
@@ -897,79 +949,54 @@ function initialize_bind_groups(){
         calculatePressures_settings_bind_group: device.createBindGroup({
             layout: pipelines.pressure.getBindGroupLayout(1),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
+                { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
 
         calculatePressureAccelerations_bind_group: device.createBindGroup({
             layout: pipelines.pressureAccelerations.getBindGroupLayout(0),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: gpu_buffers.positions }
-                }, 
-                {
-                    binding: 2,
-                    resource: { buffer: gpu_buffers.pressure_accelerations }
-                },
-                {
-                    binding: 4,
-                    resource: { buffer: gpu_buffers.densities }
-                }, 
-                {
-                    binding: 5,
-                    resource: { buffer: gpu_buffers.pressures }
-                },
-                {
-                    binding: 9,
-                    resource: { buffer: particle_neighbors_buffer }
-                }, 
+                { binding: 0, resource: { buffer: gpu_buffers.positions } }, 
+                { binding: 2, resource: { buffer: gpu_buffers.pressure_accelerations } },
+                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
+                { binding: 5, resource: { buffer: gpu_buffers.pressures } },
+                { binding: 9, resource: { buffer: particle_neighbors_buffer } }, 
             ]
         }),
         calculatePressureAccelerations_settings_bind_group: device.createBindGroup({
             layout: pipelines.pressureAccelerations.getBindGroupLayout(1),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
+                { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
         calculateViscosityAccelerations_bind_group: device.createBindGroup({
             layout: pipelines.viscosityAccelerations.getBindGroupLayout(0),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: gpu_buffers.positions }
-                }, 
-                {
-                    binding: 1,
-                    resource: { buffer: gpu_buffers.velocities }
-                }, 
-                {
-                    binding: 3,
-                    resource: { buffer: gpu_buffers.viscosity_accelerations }
-                },
-                {
-                    binding: 4,
-                    resource: { buffer: gpu_buffers.densities }
-                }, 
-                {
-                    binding: 9,
-                    resource: { buffer: particle_neighbors_buffer }
-                }, 
+                { binding: 0, resource: { buffer: gpu_buffers.positions } }, 
+                { binding: 1, resource: { buffer: gpu_buffers.velocities } }, 
+                { binding: 3, resource: { buffer: gpu_buffers.viscosity_accelerations } },
+                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
+                { binding: 9, resource: { buffer: particle_neighbors_buffer } }, 
             ]
         }),
         calculateViscosityAccelerations_settings_bind_group: device.createBindGroup({
             layout: pipelines.viscosityAccelerations.getBindGroupLayout(1),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
+                { binding: 0, resource: { buffer: uniform_buffer } },
+            ]
+        }),
+        calculatePositionCorrections: device.createBindGroup({
+            layout: pipelines.calculatePositionCorrections.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: gpu_buffers.positions } }, 
+                { binding: 9, resource: { buffer: particle_neighbors_buffer } }, 
+                { binding: 11, resource: { buffer: gpu_buffers.position_corrections } }, 
+            ]
+        }),
+        calculatePositionCorrections_settings_bind_group: device.createBindGroup({
+            layout: pipelines.calculatePositionCorrections.getBindGroupLayout(1),
+            entries: [
+                { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
 
@@ -977,26 +1004,11 @@ function initialize_bind_groups(){
         integrate_bind_group: device.createBindGroup({
             layout: pipelines.integrate.getBindGroupLayout(0),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: gpu_buffers.positions }
-                },
-                {
-                    binding: 1,
-                    resource: { buffer: gpu_buffers.velocities }
-                },
-                {
-                    binding: 2,
-                    resource: { buffer: gpu_buffers.pressure_accelerations }
-                },
-                {
-                    binding: 3,
-                    resource: { buffer: gpu_buffers.viscosity_accelerations }
-                },
-                {
-                    binding: 9,
-                    resource: { buffer: particle_neighbors_buffer }
-                },
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 1, resource: { buffer: gpu_buffers.velocities } },
+                { binding: 2, resource: { buffer: gpu_buffers.pressure_accelerations } },
+                { binding: 3, resource: { buffer: gpu_buffers.viscosity_accelerations } },
+                { binding: 11, resource: { buffer: gpu_buffers.position_corrections } },
             ]
         }),
         integrate_settings_bind_group: device.createBindGroup({
@@ -1012,28 +1024,16 @@ function initialize_bind_groups(){
         vertex_bind_group : device.createBindGroup({
             layout: gpu_render_pipeline.getBindGroupLayout(2),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: gpu_buffers.positions }
-                },
-                {
-                    binding: 1,
-                    resource: { buffer: gpu_buffers.velocities }
-                },
-                {
-                    binding: 4,
-                    resource: { buffer: gpu_buffers.densities }
-                },
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 1, resource: { buffer: gpu_buffers.velocities } },
+                { binding: 4, resource: { buffer: gpu_buffers.densities } },
             ]
         }),
 
         render_settings_bind_group: device.createBindGroup({
             layout: gpu_render_pipeline.getBindGroupLayout(1),
             entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
+                { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
     }

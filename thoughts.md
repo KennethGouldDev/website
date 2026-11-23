@@ -1,5 +1,11 @@
 <!-- thought -->
 
+2026-11-22
+didn't feel like working on fluid sim... but i did it anyway.. and i made great and satisfying progress!!
+
+
+<!-- thought -->
+
 2026-11-21
 SHOUT OUTS to the UNIVERSITY of ILLINOIS!!!!!
 

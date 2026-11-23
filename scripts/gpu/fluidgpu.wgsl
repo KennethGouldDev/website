@@ -49,8 +49,18 @@ var<storage, read_write> grid_cell_counts : array<atomic<u32>>;
 @group(0) @binding(7)
 var<storage, read_write> grid_cell_indices : array<u32>;
 
+@group(0) @binding(8)
+var<storage, read_write> grid_cell_starts : array<u32>;
+
 @group(0) @binding(9)
 var<storage, read_write> particle_neighbors : array<u32>;
+
+@group(0) @binding(10)
+var<storage, read_write> particle_slots : array<u32>;
+
+
+@group(0) @binding(11)
+var<storage, read_write> position_corrections : array<vec2<f32>>;
 
 
 // vertex shaders can only *read* storage buffers. So we make another binding for purely reading
@@ -116,9 +126,20 @@ struct SimulationSettings {
     // coloring
     color_mode : u32,
     color_sensitivity : f32,
+
+    particle_min_distance : f32,
 }
 
-const max_neighbors : u32 = 500;
+@group(1) @binding(1) var <uniform> objects: Object;
+
+struct Object {
+    x : f32
+}
+
+const max_neighbors : u32 = 100;
+
+const u32_limit = 0xFFFFFFFFu;
+
 
 
 @compute @workgroup_size(64)
@@ -137,6 +158,18 @@ fn instantiateGrid( @builtin(global_invocation_id ) id: vec3<u32>){
     atomicStore(&grid_cell_counts[id.x], 0u);
 }
 
+// THE PLAN FOR THE GRID
+// we are doing a technique that makes it so the indices array isnt going to be filled with a million
+// empty slots anymore and clogging up the memory,
+// instead we are going to have three arrays:
+// an array saying where the starting index of each "nested" array is inside of the indices buffer
+// an array saying what each particle's index is in its own nested array
+// an array saying the amount of particles in each array
+// so for each "nested" array we are storing where the array is, how long it is, and for each particle
+// what it's index is inside the nested array
+// with this, we can group up every particle and only have three arrays particle_amount long!
+
+
 @compute @workgroup_size(64)
 fn doGrid( @builtin(global_invocation_id ) id: vec3<u32>){
     // put particles at the right element!
@@ -151,22 +184,94 @@ fn doGrid( @builtin(global_invocation_id ) id: vec3<u32>){
     // atomic add returns what the value USED to be
     // so this slot value is actually the index of what we want to override,
     // while it simultaneously increments the grid cell counts element!
-    let slot = atomicAdd(&grid_cell_counts[grid_i], 1u);
-    if (slot >= settings.grid_nested_length) { return; }
-    // put particle index in the right slot
-    grid_cell_indices[grid_i * settings.grid_nested_length + slot] = i;
+
+    // add to the grid_cell_counts thing to show how long that nested array is going to be
+    // while simultaneously storing its old value to store what the index of this particle is
+    // inside of its nested array
+    particle_slots[i] = atomicAdd(&grid_cell_counts[grid_i], 1u);
+}
+
+// we are only using one thread for this because it is actually important to do this sequentially
+@compute @workgroup_size(1)
+fn doGridStarts(){
+    let cell_amount = settings.grid_length_x * settings.grid_length_y;
+
+    // the explanation is kinda hard to word, but basically we will end up having a list
+    // kinda like this depending on the grid_cell_counts list
+    // 0, 2, 2, 5, 5, 7, 8, 10, 11, 11, 14
+    // get what I mean? its gonna store the starting index of each nested list
+    // this variable is how many particles we have added so far
+    var added = 0u;
+    for (var i = 0u; i < cell_amount; i++){
+        grid_cell_starts[i] = added;
+        added += atomicLoad(&grid_cell_counts[i]);
+    }
+}
+
+@compute @workgroup_size(64)
+fn gridPlaceParticles( @builtin(global_invocation_id) id: vec3<u32>){
+    let i = id.x;
+    if (i >= settings.particle_amount) { return; }
+
+    let cell = get_grid_cell_i_from_position(positions[i]);
+    // now we are gonna place the actual particle ids in the grid cell indices
+    // based on the three other arrays we just established
+    grid_cell_indices[grid_cell_starts[cell] + particle_slots[i]] = i;
 }
 
 @compute @workgroup_size(64)
 fn calculateNeighbors( @builtin(global_invocation_id) id: vec3<u32>){
-    // here we are gonna calculate the neighbors of every particle
-    // store them in the particle_neighbors buffer
     let i = id.x;
+    // dont go pass particle amount
     if (i >= settings.particle_amount) { return; }
 
-    let neighbors = get_neighbor_particles(positions[i]);
-    for (var j = 0u; j < max_neighbors; j++){
-        particle_neighbors[i * max_neighbors + j] = neighbors[j];
+    let position = positions[i];
+
+    let center_cell = get_grid_cell_i_from_position(position);
+    let center_x = i32(center_cell % settings.grid_length_x);
+    let center_y = i32(center_cell / settings.grid_length_x);
+
+    // these for loops are to get the cells surround this particle's current cell
+    var count = 0u;
+
+    // notice we are starting with signed integers to just make things easier
+    // and then we finally switched to an unsigned for the cell index
+    for (var dy= -1; dy <= 1; dy++){
+        let y = center_y + dy;
+        // bounds check
+        if (y < 0 || y >= i32(settings.grid_length_y)) { continue; }
+        
+        for (var dx = -1; dx <= 1; dx++) {
+            let x = center_x + dx;
+            // bounds check
+            if (x < 0 || x >= i32(settings.grid_length_x)) { continue; }
+
+            // get now the cell with the offsets
+            let cell = u32(y) * settings.grid_length_x + u32(x);
+            
+            // now we are looping through the particles inside the cell
+            let cap = atomicLoad(&grid_cell_counts[cell]);
+            // use the new system we made
+            let start = grid_cell_starts[cell];
+            for (var j = 0u; j < cap; j++){
+                // dont add too many neighbors
+                if (count >= max_neighbors) { break; }
+                // get an index in this cell
+                let neighbor = grid_cell_indices[start + j];
+                // make sure its close enough
+                let to = positions[neighbor] - position;
+                let radius_squared = f32(settings.grid_cell_size * settings.grid_cell_size);
+                if ((to.x * to.x + to.y * to.y) > radius_squared) { continue; }
+
+                // add neighbor
+                particle_neighbors[i * max_neighbors + count] = neighbor;
+                count++;
+            }
+        }
+    }
+    // set the next number to the u32_limit, which every other function reads as where to stop
+    if (count < max_neighbors){
+        particle_neighbors[i * max_neighbors + count] = u32_limit;
     }
 }
 
@@ -268,6 +373,76 @@ fn calculateViscosityAccelerations( @builtin(global_invocation_id) id: vec3<u32>
 }
 
 @compute @workgroup_size(64)
+fn calculatePositionCorrections( @builtin (global_invocation_id) id: vec3<u32>){
+    let i = id.x;
+    if (i >= settings.particle_amount){ return; }
+    // if particles are wayy too close to eachother, then we manually push them apart!
+    // experiment with this value
+    
+    // add up the corrections for every neighbor too close
+    var correction = vec2f(0,0);
+
+    // loop through neighbors
+    for (var j = 0u; j < max_neighbors; j++){
+        // NOTE this system of the particle neighbors buffer being a huge stacked flattened array
+        // is still very innefficient for memory. change this later.
+        let neighbor_i = particle_neighbors[i * max_neighbors + j];
+        // we are looping to the max amount of neighbors,
+        // but if we hit the terminator, stop
+        if (neighbor_i == u32_limit) { break; }
+        // dont collide with ourselves
+        if (neighbor_i == i) { continue; }
+
+        var to_neighbor = positions[neighbor_i] - positions[i];
+        var magnitude = length(to_neighbor);
+        // skip if too far away
+        if (magnitude >= settings.particle_min_distance) { continue; }
+
+        // biggest problem comes when the particles are RIGHT on top of eachother.
+        // in this case, the direction well, doesnt have a direction,
+        // so we have to come up wit hour own direction
+
+        // the important thing here, is that with this "made up" angle, both particles need to come up with their each angle
+        // that point in the exact opposite direction.
+        // We are making up this angle based on the particle's index value. In this case, we are going to choose the lesser
+        // of the two index values so that both the particle and the neighbor come up with the same answer.
+        // Depending on who it is, we just flip the magnitude
+        if (magnitude < 0.001) {
+            // the funny number at the end is one i learned about and  found online, it is a special angle that will be very unique
+            // with every i value that we multiply it with. Most angles will loop pretty quickly, but this cool number
+            // will take a while to loop!
+            // and, funny enough, it is actually called the golden angle, and is derived with the golden ratio!!
+            // search it up it is awesome.
+            let made_up_angle = f32(min(i, neighbor_i)) * 2.39996;
+            let direction = vec2f(cos(made_up_angle), sin(made_up_angle));
+            // select function is like a quick if condition, kind of like the "?" operator
+            to_neighbor = select(-direction, direction, neighbor_i > i);
+            // we are gonna make our own magnitude
+            magnitude = 0;
+        }
+
+        // see how far we are inside eachother. this is set up so that bigger means we need to push eachother out more!
+        let overlap = settings.particle_min_distance - magnitude;
+        // move AWAY from the neighbor
+        // divide by 2 because they only need to move away from eachother half as much
+        correction -= normalize(to_neighbor) * overlap / 2;
+    }
+    // weve looped through it all
+
+    // we want to be safe. make sure the correction vector isnt too long, we dont want to launch particles
+    // accross the screen lol
+    let correction_length = length(correction);
+    if (correction_length > settings.particle_radius) {
+        // normalize
+        correction /= correction_length;
+        // make it only as long as the radius of the particle
+        correction *= settings.particle_radius;
+    }
+
+    position_corrections[i] = correction;
+}
+
+@compute @workgroup_size(64)
 fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
     let i = id.x;
 
@@ -296,37 +471,17 @@ fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
     velocities[i].y += settings.gravity * settings.physics_delta_time;
 
     // air damping
-    velocities[i].x *= settings.air_damping;
-    velocities[i].y *= settings.air_damping;
+    // make sure its the same depending on deltatime
+
+    velocities[i].x *= pow(settings.air_damping, settings.physics_delta_time / (1.0/60.0));
+    velocities[i].y *= pow(settings.air_damping, settings.physics_delta_time / (1.0/60.0));
+
+    // position corrections
+    positions[i] += position_corrections[i];
 
     // apply velocities
     positions[i].x += velocities[i].x * settings.physics_delta_time;
     positions[i].y += velocities[i].y * settings.physics_delta_time;
-
-    let min_distance = f32(settings.particle_radius);
-    // if inside of another particle, push out
-    // loop through all neighbors
-    for (var j = 0u; j < max_neighbors; j++){
-        let neighbor_i = particle_neighbors[i * max_neighbors + j];
-        // if invalid, out of neighbors, stop
-        if (neighbor_i == u32_limit) { break; }
-        // if looking at self, continue
-        if (i == neighbor_i) { continue; }
-
-        var to_neighbor = positions[neighbor_i] - positions[i];
-        let magnitude = distance(vec2f(0,0), to_neighbor);
-        // if too far dont push out
-        if (magnitude > min_distance) { continue; }
-        // if on top of eachother we gotta make a vector
-        if (magnitude == 0) 
-        { 
-            to_neighbor = vec2f(0,f32(i) * settings.physics_delta_time) * 0.1; 
-        }
-        // push out
-        // figuring this out another time.
-        // NOTE just realized i cant do it here because of race conditions modifying the positions var
-        // im gonna have to make a buffer for this specifically etc.
-    }
 
     // collide with borders
     // bottom
@@ -477,12 +632,27 @@ fn canvas_position_to_clip_position(canvas_position : vec2<f32>) -> vec2<f32> {
 // that shouldnt be too bad!
 // NOTE NOTE make sure to adjust all the 100s all the way down if you
 // actually want to adjust that cap.
-fn get_neighbor_particles(position : vec2<f32>) -> array<u32, max_neighbors>{
-    let grid_cell_i = get_grid_cell_i_from_position(position);
-    let neighbor_grid_cells = get_3x3_grid_cell_indices(grid_cell_i);
-    let particle_indices = get_particle_indices_inside_3x3_cells(neighbor_grid_cells);
-    return particle_indices;
-}
+
+// OLD neighbor functions, replaced them with more optimized stuff
+
+// fn calculateNeighbors( @builtin(global_invocation_id) id: vec3<u32>){
+//     // here we are gonna calculate the neighbors of every particle
+//     // store them in the particle_neighbors buffer
+//     let i = id.x;
+//     if (i >= settings.particle_amount) { return; }
+
+//     let neighbors = get_neighbor_particles(positions[i]);
+//     for (var j = 0u; j < max_neighbors; j++){
+//         particle_neighbors[i * max_neighbors + j] = neighbors[j];
+//     }
+// };
+
+// fn get_neighbor_particles(position : vec2<f32>) -> array<u32, max_neighbors>{
+//     let grid_cell_i = get_grid_cell_i_from_position(position);
+//     let neighbor_grid_cells = get_3x3_grid_cell_indices(grid_cell_i);
+//     let particle_indices = get_particle_indices_inside_3x3_cells(neighbor_grid_cells);
+//     return particle_indices;
+// }
 
 fn get_grid_cell_i_from_position(position : vec2<f32>) -> u32{
     let grid_x = i32(floor(position.x / f32(settings.grid_cell_size)));
@@ -494,101 +664,100 @@ fn get_grid_cell_i_from_position(position : vec2<f32>) -> u32{
     return u32(clamped_y) * settings.grid_length_x + u32(clamped_x);
 }
 
-const u32_limit = 0xFFFFFFFFu;
-fn get_3x3_grid_cell_indices(grid_cell_i : u32) -> array<u32, 9>{
-    var ret : array<u32, 9>;
-    // fill the array with the unsigned 32 bit integer limit
-    // this is just an easy way to say 4,294,967,295
-    for (var i = 0u; i < 9u; i++){
-        ret[i] = u32_limit;
-    }
-    // we do this because we need a way to know if a cell is invalid
-    // in js, id usually do something like if it's negative 1 its invalid,
-    // but here we are using unsigned ints! so instead we use the limit 
-    // (its the next best thing lol)
+// fn get_3x3_grid_cell_indices(grid_cell_i : u32) -> array<u32, 9>{
+//     var ret : array<u32, 9>;
+//     // fill the array with the unsigned 32 bit integer limit
+//     // this is just an easy way to say 4,294,967,295
+//     for (var i = 0u; i < 9u; i++){
+//         ret[i] = u32_limit;
+//     }
+//     // we do this because we need a way to know if a cell is invalid
+//     // in js, id usually do something like if it's negative 1 its invalid,
+//     // but here we are using unsigned ints! so instead we use the limit 
+//     // (its the next best thing lol)
 
-    let x = grid_cell_i % settings.grid_length_x;
-    let y = grid_cell_i / settings.grid_length_x;
-    // remember these integer operations automatically floor
+//     let x = grid_cell_i % settings.grid_length_x;
+//     let y = grid_cell_i / settings.grid_length_x;
+//     // remember these integer operations automatically floor
 
-    // Reading order
+//     // Reading order
 
-    // check top
-    if (y > 0){
-        // top left
-        // check left
-        if (x > 0){
-            ret[0] = grid_cell_i - settings.grid_length_x - 1;
-        }
-        // top middle
-        ret[1] = grid_cell_i - settings.grid_length_x;
-        // top right
-        // check right
-        if (x < settings.grid_length_x - 1){
-            ret[2] = grid_cell_i - settings.grid_length_x + 1;
-        }
-    }
+//     // check top
+//     if (y > 0){
+//         // top left
+//         // check left
+//         if (x > 0){
+//             ret[0] = grid_cell_i - settings.grid_length_x - 1;
+//         }
+//         // top middle
+//         ret[1] = grid_cell_i - settings.grid_length_x;
+//         // top right
+//         // check right
+//         if (x < settings.grid_length_x - 1){
+//             ret[2] = grid_cell_i - settings.grid_length_x + 1;
+//         }
+//     }
 
-    // now middle
+//     // now middle
 
-    // middle left
-    // check left
-    if (x > 0){
-        ret[3] = grid_cell_i - 1;
-    }
-    // very middle
-    ret[4] = grid_cell_i;
-    // middle right
-    // check right
-    if (x < settings.grid_length_x - 1){
-        ret[5] = grid_cell_i + 1;
-    }
+//     // middle left
+//     // check left
+//     if (x > 0){
+//         ret[3] = grid_cell_i - 1;
+//     }
+//     // very middle
+//     ret[4] = grid_cell_i;
+//     // middle right
+//     // check right
+//     if (x < settings.grid_length_x - 1){
+//         ret[5] = grid_cell_i + 1;
+//     }
 
-    // now bottom
-    // check bottom
-    if (y < settings.grid_length_y - 1){
-        // bottom left left
-        // check left
-        if (x > 0){
-            ret[6] = grid_cell_i + settings.grid_length_x - 1;
-        }
-        // bottom middle
-        ret[7] = grid_cell_i + settings.grid_length_x;
-        // bottom right
-        // check right
-        if (x < settings.grid_length_x - 1){
-            ret[8] = grid_cell_i + settings.grid_length_x + 1;
-        }
-    }
+//     // now bottom
+//     // check bottom
+//     if (y < settings.grid_length_y - 1){
+//         // bottom left left
+//         // check left
+//         if (x > 0){
+//             ret[6] = grid_cell_i + settings.grid_length_x - 1;
+//         }
+//         // bottom middle
+//         ret[7] = grid_cell_i + settings.grid_length_x;
+//         // bottom right
+//         // check right
+//         if (x < settings.grid_length_x - 1){
+//             ret[8] = grid_cell_i + settings.grid_length_x + 1;
+//         }
+//     }
 
-    return ret;
-}
+//     return ret;
+// }
 
-fn get_particle_indices_inside_3x3_cells(grid_cells : array<u32, 9>) -> array<u32, max_neighbors>{
-    var ret : array<u32, max_neighbors>;
-    // fill ret with invalid indices
-    for (var i = 0u; i < max_neighbors; i++){
-        ret[i] = u32_limit;
-    }
+// fn get_particle_indices_inside_3x3_cells(grid_cells : array<u32, 9>) -> array<u32, max_neighbors>{
+//     var ret : array<u32, max_neighbors>;
+//     // fill ret with invalid indices
+//     for (var i = 0u; i < max_neighbors; i++){
+//         ret[i] = u32_limit;
+//     }
 
-    var ret_i = 0u;
-    for (var i = 0u; i < 9u; i++){
-        let grid_i = grid_cells[i];
-        // check if invalid
-        if (grid_i == u32_limit) { continue; }
+//     var ret_i = 0u;
+//     for (var i = 0u; i < 9u; i++){
+//         let grid_i = grid_cells[i];
+//         // check if invalid
+//         if (grid_i == u32_limit) { continue; }
 
-        let indices_nested_i = grid_i * settings.grid_nested_length;
-        let nested_length = atomicLoad(&grid_cell_counts[grid_i]);
-        for (var j = 0u; j < nested_length; j++){
-            // dont exceed capacity
-            if (ret_i >= max_neighbors) { break; }
-            ret[ret_i] = grid_cell_indices[indices_nested_i + j];
-            ret_i++;
-        }
-        if (ret_i >= max_neighbors) { break; }
-    }
-    return ret;
-}
+//         let indices_nested_i = grid_i * settings.grid_nested_length;
+//         let nested_length = atomicLoad(&grid_cell_counts[grid_i]);
+//         for (var j = 0u; j < nested_length; j++){
+//             // dont exceed capacity
+//             if (ret_i >= max_neighbors) { break; }
+//             ret[ret_i] = grid_cell_indices[indices_nested_i + j];
+//             ret_i++;
+//         }
+//         if (ret_i >= max_neighbors) { break; }
+//     }
+//     return ret;
+// }
 
 
 // funny math functions!!
