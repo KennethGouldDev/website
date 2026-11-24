@@ -105,19 +105,20 @@ let prev_height = 0
 function handle_canvas_changing(){
     if (window.innerWidth == prev_width && 
         window.innerHeight == prev_height) {return}
-
     prev_width = window.innerWidth
     prev_height = window.innerHeight
 
-    let width_delta = window.innerWidth - background_canvas.width
-    let height_delta = window.innerHeight - background_canvas.height
+    // get the new proportion
+    x_proportion = window.innerWidth / background_canvas.width
+    y_proportion = window.innerHeight / background_canvas.height
+
     background_canvas.width = window.innerWidth;
     background_canvas.height = window.innerHeight;
 
-    // adjust star position
+    // adjust boid position
     boids.forEach(boid => {
-        boid.x += width_delta * (boid.x/background_canvas.width)
-        boid.y += height_delta * (boid.x/background_canvas.width)
+        boid.x *= x_proportion
+        boid.y *= y_proportion
     });
 }
 
