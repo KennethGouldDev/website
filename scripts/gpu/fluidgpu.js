@@ -43,20 +43,20 @@ let target_density = 0.003
 let border_damping = 0.95
 let air_damping = 0.994
 let physics_max_steps_per_frame = 40;
-let physics_delta_time = 1.0/480.0;
+let physics_delta_time = 1.0/960.0;
 
-let pressure_coefficient = 1500000
+let pressure_coefficient = 2500000
 let viscosity_coefficient = 5000
 
-let density_influence_radius = 20
-let pressure_influence_radius = 12
-let viscosity_influence_radius = 20
+let density_influence_radius = 10
+let pressure_influence_radius = 6
+let viscosity_influence_radius = 10
 
-let particle_radius = 4
+let particle_radius = 3.5
 let particle_mass = 1
-let particle_min_distance = 4
+let particle_min_distance = 3
 
-let particle_amount = 10000
+let particle_amount = 20000
 
 let mouse_influence_radius = 150
 let mouse_strength = 100
@@ -68,7 +68,7 @@ let color_sensitivity = 1;
 
 
 let spawn_random_variance = 5
-let spawn_position_variance = 5
+let spawn_position_variance = 2
 
 // these are things that can change per particle.
 // We will put these in their own buffers
