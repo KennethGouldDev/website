@@ -57,13 +57,16 @@ let since_star_added_time = 0;
 const add_star_every_min = 0.02;
 const add_star_every_max = 0.1;
 // changing this willl delay until stars are added
-let add_star_every = 0
+let add_star_every = -1
 
-const star_min_length = 5;
+const star_min_length = 7;
 const star_max_length = 30;
 
+const star_length_change_chance = 30;
+const star_length_change_strength = 3;
+
 let physics_accumulate = 0;
-const physics_delta = 1.0/60.0;
+const physics_delta = 1.0/120.0;
 
 requestAnimationFrame(animate)
 function animate(timestamp){    
@@ -79,7 +82,7 @@ function animate(timestamp){
     while (physics_accumulate > physics_delta) {
         if (physics_accumulate > physics_delta * 10){
             // dont make it execute more than ten times in one frame
-            physics_accumulate = 0
+            physics_accumulate = physics_delta * 10
             break
         }
         physics_accumulate -= physics_delta
@@ -95,11 +98,12 @@ function animate(timestamp){
 
     stars.forEach(star => {
         // set star opacity
-        let star_alpha = star.size/10
-        if (time < 3){
-            star_alpha *= time/3
+        // inverse lerp
+        let star_alpha = 1 - (star.length - star_min_length)/(star_max_length - star_min_length)
+        star_alpha *= 1.5
+        if (time < 2){
+            star_alpha *= time/2
         }
-        star_alpha *= .9
 
         // fade in
         let time_alive = time - star.time_added
@@ -107,37 +111,8 @@ function animate(timestamp){
             star_alpha *= time_alive/2
         }
 
-        // make the stars change direction randomly
-        star.direction += Math.random()/100
-
-        // if the star is big its usually closer
-        // which means it probably looks like its moving faster (parallax)
-        let star_speed = star.speed * .1 * star.size
-
-        star.x += star_speed/2 * mouse_force.x * -1
-        star.y += star_speed/2 * mouse_force.y * -1
-
-        star.x += Math.cos(star.direction) / 30 * star_speed
-        star.y += Math.sin(star.direction) / 15 * star_speed
-        star.y += .1 * star_speed
-
-        // wrap the stars around the borders
-        if (star.y > background_canvas.height + 10) {
-            star.y = -10
-        }
-        if (star.y < -10){
-            star.y = background_canvas.height + 10
-        }
-        if (star.x > background_canvas.width + 10) {
-            star.x = -10
-        }
-        if (star.x < -10){
-            star.x = background_canvas.width + 10
-        }
-
         // draw the star
-        star.color += (Math.random() - 0.5) * delta * 200
-        ctx.fillStyle = "rgb(150,150," + (200 + star.color) + "," + star_alpha + ")"
+        ctx.fillStyle = "rgb(50,150," + (200 + star.color) + "," + star_alpha + ")"
         // horizontal
         ctx.fillRect(star.x - star.length/2,
             star.y - star.thickness/2, 
@@ -154,8 +129,6 @@ function animate(timestamp){
     // and at the end here this function `requestAnimationFrame` waits until
     // the next frame of the website, and then calls this same function again.
     prev_time = timestamp
-    prev_mouse.x = mouse.x
-    prev_mouse.y = mouse.y
     requestAnimationFrame(animate)
 }
 
@@ -164,20 +137,20 @@ let prev_height = 0
 function handle_canvas_changing(){
     if (window.innerWidth == prev_width && 
         window.innerHeight == prev_height) {return}
-
     prev_width = window.innerWidth
     prev_height = window.innerHeight
 
-    let width_delta = window.innerWidth - background_canvas.width
-    let height_delta = window.innerHeight - background_canvas.height
+    // get the new proportion
+    x_proportion = window.innerWidth / background_canvas.width
+    y_proportion = window.innerHeight / background_canvas.height
+
     background_canvas.width = window.innerWidth;
     background_canvas.height = window.innerHeight;
 
     // adjust star position
     stars.forEach(star => {
-        let star_speed = star.speed * .1 * star.size
-        star.x += width_delta * (star.x/background_canvas.width)
-        star.y += height_delta * (star.x/background_canvas.width)
+        star.x *= x_proportion
+        star.y *= y_proportion
     });
 }
 
@@ -185,8 +158,14 @@ function randf_range(a, b){
     return (a + Math.random() * (b - a))
 }
 
+function adjust_star_length(star, new_length){
+    star.length = new_length
+    star.thickness = -(star.length - star_max_length)/4
+    star.size = star_max_length - star.length
+}
+
 function physics_process(delta, time){
-    // add stars every x seconds
+    // add stars over time
     if (stars.length < stars_amount){
         since_star_added_time += delta
         if (since_star_added_time > add_star_every){
@@ -208,8 +187,7 @@ function physics_process(delta, time){
                 size: 0 //set later
             });
             let change_star = stars.at(-1)
-            change_star.thickness = -(change_star.length - star_max_length)/4
-            change_star.size = star_max_length - change_star.length
+            adjust_star_length(change_star, change_star.length)
         }
     }
 
@@ -224,7 +202,7 @@ function physics_process(delta, time){
     mouse_delta.y = Math.min(mouse_delta.y, mouse_delta_clamp)
     mouse_delta.y = Math.max(mouse_delta.y, -mouse_delta_clamp)
 
-    let mouse_force_inverse_drag = 0.02
+    let mouse_force_inverse_drag = 0.015
     
     let a = mouse_delta.x/3
     mouse_force.x += (a * a) * Math.sign(a) / 200
@@ -249,11 +227,58 @@ function physics_process(delta, time){
 
     // do star velocity
     stars.forEach(star =>{
+        // make the stars change direction randomly
+        star.direction += Math.random()/100
+
+        // if the star is big its usually closer
+        // which means it probably looks like its moving faster (parallax)
+        let star_speed = star.speed * .1 * star.size
+
+        star.x += star_speed/2 * mouse_force.x * -1
+        star.y += star_speed/2 * mouse_force.y * -1
+
+        star.x += Math.cos(star.direction) / 30 * star_speed
+        star.y += Math.sin(star.direction) / 15 * star_speed
+        star.y += .1 * star_speed
+        
+        // mess with the values
+        // mess with color
+        star.color += (Math.random() - 0.5) * delta * 1000
+        // clamp
+        star.color = Math.max(-50, Math.min(50, star.color))
+
+        // do velocity
         star.x += star.velocity_x * delta * (star.size/10)
         star.y += star.velocity_y * delta * (star.size/10)
 
         // dampen
         star.velocity_x *= .99
         star.velocity_y *= .99
+
+        // wrap the stars around the borders
+        if (star.y > background_canvas.height + 10) {
+            star.y = -10
+        }
+        if (star.y < -10){
+            star.y = background_canvas.height + 10
+        }
+        if (star.x > background_canvas.width + 10) {
+            star.x = -10
+        }
+        if (star.x < -10){
+            star.x = background_canvas.width + 10
+        }
+
+        // mess with star values
+        if (Math.random() * star_length_change_chance < 1){
+            let new_length = star.length
+            new_length += (Math.random() - 0.5) * star_length_change_strength
+            // clamp
+            new_length = Math.max(star_min_length, Math.min(star_max_length, new_length))
+            adjust_star_length(star, new_length)
+        }
     })
+
+    prev_mouse.x = mouse.x
+    prev_mouse.y = mouse.y
 }

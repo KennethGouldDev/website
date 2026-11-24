@@ -65,6 +65,10 @@ async function loadJournals(){
         // and then make them say the proper things
         const entry = document.createElement("div")
         entry.className = "journal-entry"
+        
+        if (file == "warning.md"){
+            entry.classList.add("journal-warning")
+        }
 
         // make the header
         const summary = document.createElement("button")

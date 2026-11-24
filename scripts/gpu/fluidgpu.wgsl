@@ -52,9 +52,6 @@ var<storage, read_write> grid_cell_indices : array<u32>;
 @group(0) @binding(8)
 var<storage, read_write> grid_cell_starts : array<u32>;
 
-@group(0) @binding(9)
-var<storage, read_write> particle_neighbors : array<u32>;
-
 @group(0) @binding(10)
 var<storage, read_write> particle_slots : array<u32>;
 
@@ -128,6 +125,10 @@ struct SimulationSettings {
     color_sensitivity : f32,
 
     particle_min_distance : f32,
+
+    resize_scale_x : f32,
+    resize_scale_y : f32,
+
 }
 
 @group(1) @binding(1) var <uniform> objects: Object;
@@ -135,12 +136,6 @@ struct SimulationSettings {
 struct Object {
     x : f32
 }
-
-const max_neighbors : u32 = 100;
-
-const u32_limit = 0xFFFFFFFFu;
-
-
 
 @compute @workgroup_size(64)
 fn instantiateGrid( @builtin(global_invocation_id ) id: vec3<u32>){
@@ -191,20 +186,64 @@ fn doGrid( @builtin(global_invocation_id ) id: vec3<u32>){
     particle_slots[i] = atomicAdd(&grid_cell_counts[grid_i], 1u);
 }
 
-// we are only using one thread for this because it is actually important to do this sequentially
-@compute @workgroup_size(1)
-fn doGridStarts(){
+// ---we are only using one thread for this because it is actually important to do this sequentially---
+// HEY the above comment is now a LIE!!
+// this is now becoming the bottleneck. we need to MULTITHREAD THIS!
+// the main trick is that we are still only going to use one workgroup, so that each workgroup thread can communicate
+// 256 threads here we go!!
+
+// this is a variable that is shared by all the threads in the workgroup
+var<workgroup> chunk_sums : array<u32, 256>;
+
+@compute @workgroup_size(256)
+// get where each nested array starts
+fn doGridStarts( @builtin (local_invocation_id) id: vec3<u32>){
     let cell_amount = settings.grid_length_x * settings.grid_length_y;
 
-    // the explanation is kinda hard to word, but basically we will end up having a list
-    // kinda like this depending on the grid_cell_counts list
-    // 0, 2, 2, 5, 5, 7, 8, 10, 11, 11, 14
-    // get what I mean? its gonna store the starting index of each nested list
-    // this variable is how many particles we have added so far
-    var added = 0u;
-    for (var i = 0u; i < cell_amount; i++){
-        grid_cell_starts[i] = added;
-        added += atomicLoad(&grid_cell_counts[i]);
+    // step one,
+    // split the amount of cells into chunks, so that each thread ( of the 256 ) 
+    // gets a handful of elements to work with
+    // the "+ 255u" is a simple trick to make the integer division round up instead of down
+    let chunk_size = (cell_amount + 255u) / 256u;
+    let start = id.x * chunk_size;
+    // cap the ending for obv reasons
+    let end = min(start + chunk_size, cell_amount);
+
+    // add up how many particles are in my chunk
+    var my_sum = 0u;
+    for (var c = start; c < end; c++){
+        my_sum += atomicLoad(&grid_cell_counts[c]);
+    }
+    chunk_sums[id.x] = my_sum;
+
+    // this is the special sauce that waits until ALL the threads have written their sum
+    workgroupBarrier();
+
+    // NOW we have ONE thread turn all of the sums into start positions
+    // this is fine because instead of one thread looping through every single cell,
+    // now we just have a thread doing 256 operations
+    // only make the first thread do this
+    if (id.x == 0u){
+        var total = 0u;
+        for (var t = 0u; t < 256u; t++){
+            let sum = chunk_sums[t];
+            chunk_sums[t] = total;
+            total += sum;
+            // this is some elegant code that will convert the array being how many elements are in each,
+            // into the starting index of each chunk ( if that makes sense idk )
+        }
+    }
+
+    // everyone else waits for that one thread to be done
+    workgroupBarrier();
+
+    // start out at where this chunk starts at
+    var running = chunk_sums[id.x];
+    for (var c = start; c < end; c++){
+        // now this is where we figure out where each element inside 
+        // the chunk im responsible for starts
+        grid_cell_starts[c] = running;
+        running += atomicLoad(&grid_cell_counts[c]);
     }
 }
 
@@ -220,80 +259,43 @@ fn gridPlaceParticles( @builtin(global_invocation_id) id: vec3<u32>){
 }
 
 @compute @workgroup_size(64)
-fn calculateNeighbors( @builtin(global_invocation_id) id: vec3<u32>){
-    let i = id.x;
-    // dont go pass particle amount
-    if (i >= settings.particle_amount) { return; }
-
-    let position = positions[i];
-
-    let center_cell = get_grid_cell_i_from_position(position);
-    let center_x = i32(center_cell % settings.grid_length_x);
-    let center_y = i32(center_cell / settings.grid_length_x);
-
-    // these for loops are to get the cells surround this particle's current cell
-    var count = 0u;
-
-    // notice we are starting with signed integers to just make things easier
-    // and then we finally switched to an unsigned for the cell index
-    for (var dy= -1; dy <= 1; dy++){
-        let y = center_y + dy;
-        // bounds check
-        if (y < 0 || y >= i32(settings.grid_length_y)) { continue; }
-        
-        for (var dx = -1; dx <= 1; dx++) {
-            let x = center_x + dx;
-            // bounds check
-            if (x < 0 || x >= i32(settings.grid_length_x)) { continue; }
-
-            // get now the cell with the offsets
-            let cell = u32(y) * settings.grid_length_x + u32(x);
-            
-            // now we are looping through the particles inside the cell
-            let cap = atomicLoad(&grid_cell_counts[cell]);
-            // use the new system we made
-            let start = grid_cell_starts[cell];
-            for (var j = 0u; j < cap; j++){
-                // dont add too many neighbors
-                if (count >= max_neighbors) { break; }
-                // get an index in this cell
-                let neighbor = grid_cell_indices[start + j];
-                // make sure its close enough
-                let to = positions[neighbor] - position;
-                let radius_squared = f32(settings.grid_cell_size * settings.grid_cell_size);
-                if ((to.x * to.x + to.y * to.y) > radius_squared) { continue; }
-
-                // add neighbor
-                particle_neighbors[i * max_neighbors + count] = neighbor;
-                count++;
-            }
-        }
-    }
-    // set the next number to the u32_limit, which every other function reads as where to stop
-    if (count < max_neighbors){
-        particle_neighbors[i * max_neighbors + count] = u32_limit;
-    }
-}
-
-@compute @workgroup_size(64)
 fn calculateDensities( @builtin(global_invocation_id) id: vec3<u32>){
     let particle_i = id.x;
 
     // dont go past how many elements there are
     if (particle_i >= settings.particle_amount){ return; }
 
-    // loop through neighbors
+    let particle_position = positions[particle_i];
+
     var new_density = 0f;
-    for (var j = 0u; j < max_neighbors; j++){
-        let neighbor_i = particle_neighbors[particle_i * max_neighbors + j];
-        // if invalid, out of neighbors, stop
-        if (neighbor_i == u32_limit) { break; }
-        let to_neighbor = positions[neighbor_i] - positions[particle_i];
-        let magnitude = distance(vec2f(0,0), to_neighbor);
-        // if not close enough, skip
-        if (magnitude > settings.density_influence_radius) { continue; }
-        new_density += settings.particle_mass * 
-            SPHpoly6(magnitude, settings.density_influence_radius);
+
+    // loop through neighbors
+    let this_cell = get_grid_cell_i_from_position(particle_position);
+    let cell_x = i32(this_cell % settings.grid_length_x);
+    let cell_y = i32(this_cell / settings.grid_length_x);
+    // visit the 8 cells around this
+    // just a lot of checks
+    for (var dy = -1; dy <= 1; dy++){
+        var cy = cell_y + dy;
+        if (cy < 0 || cy >= i32(settings.grid_length_y)) { continue; }
+        for (var dx = -1; dx <= 1; dx++){
+            var cx = cell_x + dx;
+            if (cx < 0 || cx >= i32(settings.grid_length_x)) { continue; }
+            // the amount of neighbors we want to loop through is the looped cell's grid_cell_counts value
+            var cell = u32(cy) * settings.grid_length_x + u32(cx);
+            for (var j = 0u; j < atomicLoad(&grid_cell_counts[cell]); j++){
+                let neighbor_i = grid_cell_indices[grid_cell_starts[cell] + j];
+                
+                // the actual function
+                let to_neighbor = positions[neighbor_i] - positions[particle_i];
+                let magnitude = distance(vec2f(0,0), to_neighbor);
+                // if not close enough, skip
+                if (magnitude > settings.density_influence_radius) { continue; }
+                new_density += settings.particle_mass * 
+                    SPHpoly6(magnitude, settings.density_influence_radius);
+
+            }
+        }
     }
     densities[particle_i] = new_density;
 }
@@ -318,23 +320,38 @@ fn calculatePressureAccelerations( @builtin(global_invocation_id) id: vec3<u32>)
 
     var pressure_acceleration = vec2f(0,0);
     // loop through all neighbors
-    for (var j = 0u; j < max_neighbors; j++){
-        let neighbor_i = particle_neighbors[particle_i * max_neighbors + j];
-        // if invalid, out of neighbors, stop
-        if (neighbor_i == u32_limit) { break; }
-        let to_particle = positions[particle_i] - positions[neighbor_i];
-        let magnitude = distance(vec2f(0,0), to_particle);
-        // if not close enough or in the same spot, skip
-        if (magnitude == 0 || magnitude > settings.pressure_influence_radius) { continue; }
-        
-        // lot of neat math stuff here but im not gonna bother on
-        // commenting on a lot of it, for more information check out the cpu
-        // version of this, fluidsim.js
-        let gradient = SPHspikyGradient(to_particle, magnitude, settings.pressure_influence_radius);
-        let pressure_term = (pressures[particle_i] + pressures[neighbor_i]) /
-            (2 * densities[particle_i] * densities[neighbor_i]);
-        pressure_acceleration.x += -settings.particle_mass * pressure_term * gradient.x;
-        pressure_acceleration.y += -settings.particle_mass * pressure_term * gradient.y;
+    // loop through neighbors
+    let this_cell = get_grid_cell_i_from_position(positions[particle_i]);
+    let cell_x = i32(this_cell % settings.grid_length_x);
+    let cell_y = i32(this_cell / settings.grid_length_x);
+    // visit the 8 cells around this
+    // just a lot of checks
+    for (var dy = -1; dy <= 1; dy++){
+        var cy = cell_y + dy;
+        if (cy < 0 || cy >= i32(settings.grid_length_y)) { continue; }
+        for (var dx = -1; dx <= 1; dx++){
+            var cx = cell_x + dx;
+            if (cx < 0 || cx >= i32(settings.grid_length_x)) { continue; }
+            // the amount of neighbors we want to loop through is the looped cell's grid_cell_counts value
+            var cell = u32(cy) * settings.grid_length_x + u32(cx);
+            for (var j = 0u; j < atomicLoad(&grid_cell_counts[cell]); j++){
+                let neighbor_i = grid_cell_indices[grid_cell_starts[cell] + j];
+
+                let to_particle = positions[particle_i] - positions[neighbor_i];
+                let magnitude = distance(vec2f(0,0), to_particle);
+                // if not close enough or in the same spot, skip
+                if (magnitude == 0 || magnitude > settings.pressure_influence_radius) { continue; }
+                
+                // lot of neat math stuff here but im not gonna bother on
+                // commenting on a lot of it, for more information check out the cpu
+                // version of this, fluidsim.js
+                let gradient = SPHspikyGradient(to_particle, magnitude, settings.pressure_influence_radius);
+                let pressure_term = (pressures[particle_i] + pressures[neighbor_i]) /
+                    (2 * densities[particle_i] * densities[neighbor_i]);
+                pressure_acceleration.x += -settings.particle_mass * pressure_term * gradient.x;
+                pressure_acceleration.y += -settings.particle_mass * pressure_term * gradient.y;
+            }
+        }
     }
     pressure_accelerations[particle_i].x = pressure_acceleration.x;
     pressure_accelerations[particle_i].y = pressure_acceleration.y;
@@ -348,25 +365,39 @@ fn calculateViscosityAccelerations( @builtin(global_invocation_id) id: vec3<u32>
     if (particle_i >= settings.particle_amount){ return; }
 
     var viscosity_acceleration = vec2f(0,0);
-    // loop through all neighbors
-    for (var j = 0u; j < max_neighbors; j++){
-        let neighbor_i = particle_neighbors[particle_i * max_neighbors + j];
-        // if invalid, out of neighbors, stop
-        if (neighbor_i == u32_limit) { break; }
 
-        let to_neighbor = positions[neighbor_i] - positions[particle_i];
-        let magnitude = distance(vec2f(0,0), to_neighbor);
-        // skip if on top or too far
-        if (magnitude == 0 || magnitude >= settings.viscosity_influence_radius) { continue; }
-        // viscosity scalar
-        let laplacian = SPHlaplacian(magnitude, settings.viscosity_influence_radius);
-        let velocity_difference = velocities[neighbor_i] - velocities[particle_i];
+    // loop through neighbors
+    let this_cell = get_grid_cell_i_from_position(positions[particle_i]);
+    let cell_x = i32(this_cell % settings.grid_length_x);
+    let cell_y = i32(this_cell / settings.grid_length_x);
+    // visit the 8 cells around this
+    // just a lot of checks
+    for (var dy = -1; dy <= 1; dy++){
+        var cy = cell_y + dy;
+        if (cy < 0 || cy >= i32(settings.grid_length_y)) { continue; }
+        for (var dx = -1; dx <= 1; dx++){
+            var cx = cell_x + dx;
+            if (cx < 0 || cx >= i32(settings.grid_length_x)) { continue; }
+            // the amount of neighbors we want to loop through is the looped cell's grid_cell_counts value
+            var cell = u32(cy) * settings.grid_length_x + u32(cx);
+            for (var j = 0u; j < atomicLoad(&grid_cell_counts[cell]); j++){
+                let neighbor_i = grid_cell_indices[grid_cell_starts[cell] + j];
 
-        let viscosity_term = settings.particle_mass / densities[neighbor_i] * laplacian;
+                let to_neighbor = positions[neighbor_i] - positions[particle_i];
+                let magnitude = distance(vec2f(0,0), to_neighbor);
+                // skip if on top or too far
+                if (magnitude == 0 || magnitude >= settings.viscosity_influence_radius) { continue; }
+                // viscosity scalar
+                let laplacian = SPHlaplacian(magnitude, settings.viscosity_influence_radius);
+                let velocity_difference = velocities[neighbor_i] - velocities[particle_i];
 
-        // apply
-        viscosity_acceleration.x += settings.viscosity_coefficient * viscosity_term * velocity_difference.x;
-        viscosity_acceleration.y += settings.viscosity_coefficient * viscosity_term * velocity_difference.y;
+                let viscosity_term = settings.particle_mass / densities[neighbor_i] * laplacian;
+
+                // apply
+                viscosity_acceleration.x += settings.viscosity_coefficient * viscosity_term * velocity_difference.x;
+                viscosity_acceleration.y += settings.viscosity_coefficient * viscosity_term * velocity_difference.y;
+            }
+        }
     }
     // yay
     viscosity_accelerations[particle_i] = viscosity_acceleration;
@@ -383,49 +414,61 @@ fn calculatePositionCorrections( @builtin (global_invocation_id) id: vec3<u32>){
     var correction = vec2f(0,0);
 
     // loop through neighbors
-    for (var j = 0u; j < max_neighbors; j++){
-        // NOTE this system of the particle neighbors buffer being a huge stacked flattened array
-        // is still very innefficient for memory. change this later.
-        let neighbor_i = particle_neighbors[i * max_neighbors + j];
-        // we are looping to the max amount of neighbors,
-        // but if we hit the terminator, stop
-        if (neighbor_i == u32_limit) { break; }
-        // dont collide with ourselves
-        if (neighbor_i == i) { continue; }
+    // loop through neighbors
+    let this_cell = get_grid_cell_i_from_position(positions[i]);
+    let cell_x = i32(this_cell % settings.grid_length_x);
+    let cell_y = i32(this_cell / settings.grid_length_x);
+    // visit the 8 cells around this
+    // just a lot of checks
+    for (var dy = -1; dy <= 1; dy++){
+        var cy = cell_y + dy;
+        if (cy < 0 || cy >= i32(settings.grid_length_y)) { continue; }
+        for (var dx = -1; dx <= 1; dx++){
+            var cx = cell_x + dx;
+            if (cx < 0 || cx >= i32(settings.grid_length_x)) { continue; }
+            // the amount of neighbors we want to loop through is the looped cell's grid_cell_counts value
+            var cell = u32(cy) * settings.grid_length_x + u32(cx);
+            for (var j = 0u; j < atomicLoad(&grid_cell_counts[cell]); j++){
+                let neighbor_i = grid_cell_indices[grid_cell_starts[cell] + j];
 
-        var to_neighbor = positions[neighbor_i] - positions[i];
-        var magnitude = length(to_neighbor);
-        // skip if too far away
-        if (magnitude >= settings.particle_min_distance) { continue; }
+                // dont collide with ourselves
+                if (neighbor_i == i) { continue; }
 
-        // biggest problem comes when the particles are RIGHT on top of eachother.
-        // in this case, the direction well, doesnt have a direction,
-        // so we have to come up wit hour own direction
+                var to_neighbor = positions[neighbor_i] - positions[i];
+                var magnitude = length(to_neighbor);
+                // skip if too far away
+                if (magnitude >= settings.particle_min_distance) { continue; }
 
-        // the important thing here, is that with this "made up" angle, both particles need to come up with their each angle
-        // that point in the exact opposite direction.
-        // We are making up this angle based on the particle's index value. In this case, we are going to choose the lesser
-        // of the two index values so that both the particle and the neighbor come up with the same answer.
-        // Depending on who it is, we just flip the magnitude
-        if (magnitude < 0.001) {
-            // the funny number at the end is one i learned about and  found online, it is a special angle that will be very unique
-            // with every i value that we multiply it with. Most angles will loop pretty quickly, but this cool number
-            // will take a while to loop!
-            // and, funny enough, it is actually called the golden angle, and is derived with the golden ratio!!
-            // search it up it is awesome.
-            let made_up_angle = f32(min(i, neighbor_i)) * 2.39996;
-            let direction = vec2f(cos(made_up_angle), sin(made_up_angle));
-            // select function is like a quick if condition, kind of like the "?" operator
-            to_neighbor = select(-direction, direction, neighbor_i > i);
-            // we are gonna make our own magnitude
-            magnitude = 0;
+                // biggest problem comes when the particles are RIGHT on top of eachother.
+                // in this case, the direction well, doesnt have a direction,
+                // so we have to come up wit hour own direction
+
+                // the important thing here, is that with this "made up" angle, both particles need to come up with their each angle
+                // that point in the exact opposite direction.
+                // We are making up this angle based on the particle's index value. In this case, we are going to choose the lesser
+                // of the two index values so that both the particle and the neighbor come up with the same answer.
+                // Depending on who it is, we just flip the magnitude
+                if (magnitude < 0.001) {
+                    // the funny number at the end is one i learned about and  found online, it is a special angle that will be very unique
+                    // with every i value that we multiply it with. Most angles will loop pretty quickly, but this cool number
+                    // will take a while to loop!
+                    // and, funny enough, it is actually called the golden angle, and is derived with the golden ratio!!
+                    // search it up it is awesome.
+                    let made_up_angle = f32(min(i, neighbor_i)) * 2.39996;
+                    let direction = vec2f(cos(made_up_angle), sin(made_up_angle));
+                    // select function is like a quick if condition, kind of like the "?" operator
+                    to_neighbor = select(-direction, direction, neighbor_i > i);
+                    // we are gonna make our own magnitude
+                    magnitude = 0;
+                }
+
+                // see how far we are inside eachother. this is set up so that bigger means we need to push eachother out more!
+                let overlap = settings.particle_min_distance - magnitude;
+                // move AWAY from the neighbor
+                // divide by 2 because they only need to move away from eachother half as much
+                correction -= normalize(to_neighbor) * overlap / 2;
+            }
         }
-
-        // see how far we are inside eachother. this is set up so that bigger means we need to push eachother out more!
-        let overlap = settings.particle_min_distance - magnitude;
-        // move AWAY from the neighbor
-        // divide by 2 because they only need to move away from eachother half as much
-        correction -= normalize(to_neighbor) * overlap / 2;
     }
     // weve looped through it all
 
@@ -443,6 +486,7 @@ fn calculatePositionCorrections( @builtin (global_invocation_id) id: vec3<u32>){
 }
 
 @compute @workgroup_size(64)
+// make sure nothing in this loops over neighbors
 fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
     let i = id.x;
 
@@ -482,6 +526,10 @@ fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
     // apply velocities
     positions[i].x += velocities[i].x * settings.physics_delta_time;
     positions[i].y += velocities[i].y * settings.physics_delta_time;
+
+    // adjust position if the canvas is resized
+    positions[i].x *= settings.resize_scale_x;
+    positions[i].y *= settings.resize_scale_y;
 
     // collide with borders
     // bottom

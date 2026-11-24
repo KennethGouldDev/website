@@ -13,10 +13,6 @@ let gpu_canvas_format
 // this get initialized with the pipelines
 let gpu_render_pipeline
 
-// make the canvas match the window size
-background_canvas.width = window.innerWidth;
-background_canvas.height = window.innerHeight;
-
 // track mouse
 let mouse = {
     x: 0,
@@ -45,12 +41,12 @@ document.addEventListener("mouseup", () =>{
 let gravity = 1000
 let target_density = 0.003
 let border_damping = 0.95
-let air_damping = 0.995
+let air_damping = 0.994
 let physics_max_steps_per_frame = 40;
 let physics_delta_time = 1.0/480.0;
 
-let pressure_coefficient = 2000000
-let viscosity_coefficient = 8000
+let pressure_coefficient = 1500000
+let viscosity_coefficient = 5000
 
 let density_influence_radius = 20
 let pressure_influence_radius = 12
@@ -87,10 +83,18 @@ let viscosity_accelerations = []
 // GPU!!!
 // ----------------------------------------------- INITIALIZE
 
+await initialize_gpu()
+
+let prev_window_width = -1
+let prev_window_height = -1
+let resize_scale_x = 1
+let resize_scale_y = 1
+
+update_canvas()
+
 // create particle data
 create_particle_data()
 
-await initialize_gpu()
 
 // we are gonna make a dictionary of all the gpu buffers we gon use
 let gpu_buffers = {}
@@ -102,8 +106,6 @@ let uniform_floats
 let uniform_uints
 let uniform_buffer
 initialize_uniform_buffer()
-let particle_neighbors_buffer
-initialize_particle_neighbors_buffer()
 
 // get the actual scripts
 let shader_module = await initialize_shaders()
@@ -235,12 +237,6 @@ function physics_process(delta, time){
     compute_pass.setBindGroup(1, bind_groups.gridPlaceParticles_settings_bind_group)
     compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
 
-    // calculate neighbors
-    compute_pass.setPipeline(pipelines.calculateNeighbors)
-    compute_pass.setBindGroup(0, calculateNeighbors_bind_group)
-    compute_pass.setBindGroup(1, bind_groups.calculateNeighbors_settings_bind_group)
-    compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
-
 
     // density
     compute_pass.setPipeline(pipelines.density)
@@ -268,7 +264,7 @@ function physics_process(delta, time){
 
     // position corrections
     compute_pass.setPipeline(pipelines.calculatePositionCorrections)
-    compute_pass.setBindGroup(0, bind_groups.calculatePositionCorrections)
+    compute_pass.setBindGroup(0, bind_groups.calculatePositionCorrections_bind_group)
     compute_pass.setBindGroup(1, bind_groups.calculatePositionCorrections_settings_bind_group)
     compute_pass.dispatchWorkgroups(Math.ceil(particle_amount / workgroup_size))
 
@@ -321,7 +317,6 @@ var instantiateGrid_bind_group
 var doGrid_bind_group
 var doGridStarts_bind_group
 var gridPlaceParticles_bind_group
-var calculateNeighbors_bind_group
 var grid_cell_counts_buffer
 var grid_cell_starts_buffer
 var grid_cell_indices_buffer
@@ -420,35 +415,84 @@ function handle_grid(){
                 { binding: 10, resource: { buffer: particle_slots_buffer } },
             ]
         })
-        calculateNeighbors_bind_group = device.createBindGroup({
-            layout: pipelines.calculateNeighbors.getBindGroupLayout(0),
-            entries:[
+
+        // redid the neighbors thing so... we are recreating quite a lot on resize actually
+        bind_groups.calculateDensities_bind_group = device.createBindGroup({
+            layout: pipelines.density.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 4, resource: { buffer: gpu_buffers.densities } },
+                { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
+                { binding: 7, resource: { buffer: grid_cell_indices_buffer } },
+                { binding: 8, resource: { buffer: grid_cell_starts_buffer } },
+            ]
+        })
+        bind_groups.calculatePressureAccelerations_bind_group = device.createBindGroup({
+            layout: pipelines.pressureAccelerations.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 2, resource: { buffer: gpu_buffers.pressure_accelerations } },
+                { binding: 4, resource: { buffer: gpu_buffers.densities } },
+                { binding: 5, resource: { buffer: gpu_buffers.pressures } },
+                { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
+                { binding: 7, resource: { buffer: grid_cell_indices_buffer } },
+                { binding: 8, resource: { buffer: grid_cell_starts_buffer } },
+            ]
+        })
+        bind_groups.calculateViscosityAccelerations_bind_group = device.createBindGroup({
+            layout: pipelines.viscosityAccelerations.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: gpu_buffers.positions } },
+                { binding: 1, resource: { buffer: gpu_buffers.velocities } },
+                { binding: 3, resource: { buffer: gpu_buffers.viscosity_accelerations } },
+                { binding: 4, resource: { buffer: gpu_buffers.densities } },
+                { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
+                { binding: 7, resource: { buffer: grid_cell_indices_buffer } },
+                { binding: 8, resource: { buffer: grid_cell_starts_buffer } },
+            ]
+        })
+        bind_groups.calculatePositionCorrections_bind_group = device.createBindGroup({
+            layout: pipelines.calculatePositionCorrections.getBindGroupLayout(0),
+            entries: [
                 { binding: 0, resource: { buffer: gpu_buffers.positions } },
                 { binding: 6, resource: { buffer: grid_cell_counts_buffer } },
                 { binding: 7, resource: { buffer: grid_cell_indices_buffer } },
                 { binding: 8, resource: { buffer: grid_cell_starts_buffer } },
-                { binding: 9, resource: { buffer: particle_neighbors_buffer } },
+                { binding: 11, resource: { buffer: gpu_buffers.position_corrections } },
             ]
         })
     }
 }
 
-let window_width_delta
-let window_height_delta
-let prev_window_width = window.innerWidth
-let prev_window_height = window.innerHeight
 function handle_canvas_changing(){
     if (window.innerWidth == prev_window_width && 
         window.innerHeight == prev_window_height
     ) { return; }
-
     prev_window_width = window.innerWidth
     prev_window_height = window.innerHeight
+    update_canvas()
+}
 
-    window_width_delta = window.innerWidth - background_canvas.width
-    window_height_delta = window.innerHeight - background_canvas.height
-    background_canvas.width = window.innerWidth;
-    background_canvas.height = window.innerHeight;
+function update_canvas(){
+    // we have to cap out how big the canvas can be
+    // usually webgpu canvases can only be a max of 8192 wide and tall
+    
+    const size = get_canvas_size()
+    resize_scale_x = size.x / background_canvas.width
+    resize_scale_y = size.y / background_canvas.height
+    background_canvas.width = size.x;
+    background_canvas.height = size.y;
+}
+
+function get_canvas_size(){
+    let maximum = 8192
+    // if the device says something different, use that
+    if (device){
+        maximum = device.limits.maxTextureDimension2D
+    }
+    let new_width = Math.min(maximum, window.innerWidth)
+    let new_height= Math.min(maximum, window.innerHeight)
+    return {x: new_width, y: new_height}
 }
 
 function randf_range(a, b){
@@ -638,6 +682,9 @@ function update_uniform_buffer(){
 
     uniform_floats[26] = particle_min_distance
 
+    uniform_floats[27] = resize_scale_x
+    uniform_floats[28] = resize_scale_y
+
     // write to the uniform buffer
     device.queue.writeBuffer(
         uniform_buffer, 0,
@@ -646,18 +693,8 @@ function update_uniform_buffer(){
 
     // reset this so that the gpu only gets the deltas
     // for one physics step
-    window_width_delta = 0
-    window_height_delta = 0
-}
-
-function initialize_particle_neighbors_buffer(){
-    // MAKE SURE NOTE NOTE MAKE SURE
-    // this lines up with the max_neighbors constant in fluidgpu.wgsl
-    const max_neighbors = 100
-    particle_neighbors_buffer = device.createBuffer({
-        size: particle_amount * max_neighbors * 4,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-    })
+    resize_scale_x = 1
+    resize_scale_y = 1
 }
 
 
@@ -795,14 +832,6 @@ function initialize_pipelines(){
                 entryPoint: "gridPlaceParticles"
             }
         }),
-    pipelines.calculateNeighbors =
-        device.createComputePipeline({
-            layout: "auto",
-            compute: {
-                module: shader_module,
-                entryPoint: "calculateNeighbors"
-            }
-        }),
     pipelines.density =
         device.createComputePipeline({
             layout: "auto",
@@ -913,23 +942,6 @@ function initialize_bind_groups(){
             entries: [
                 { binding: 0, resource: { buffer: uniform_buffer } },
             ]}),
-        calculateNeighbors_settings_bind_group: device.createBindGroup({
-            layout: pipelines.calculateNeighbors.getBindGroupLayout(1),
-            entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: uniform_buffer }
-                },
-            ]
-        }),
-        calculateDensities_bind_group: device.createBindGroup({
-            layout: pipelines.density.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: { buffer: gpu_buffers.positions } },
-                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
-                { binding: 9, resource: { buffer: particle_neighbors_buffer } },                        
-            ]
-        }),
         calculateDensities_settings_bind_group: device.createBindGroup({
             layout: pipelines.density.getBindGroupLayout(1),
             entries: [
@@ -939,11 +951,8 @@ function initialize_bind_groups(){
         calculatePressures_bind_group: device.createBindGroup({
             layout: pipelines.pressure.getBindGroupLayout(0),
             entries: [
-                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
-                {
-                    binding: 5,
-                    resource: { buffer: gpu_buffers.pressures }
-                }
+                { binding: 4, resource: { buffer: gpu_buffers.densities } },
+                { binding: 5, resource: { buffer: gpu_buffers.pressures } },
             ]
         }),
         calculatePressures_settings_bind_group: device.createBindGroup({
@@ -952,45 +961,16 @@ function initialize_bind_groups(){
                 { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
-
-        calculatePressureAccelerations_bind_group: device.createBindGroup({
-            layout: pipelines.pressureAccelerations.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: { buffer: gpu_buffers.positions } }, 
-                { binding: 2, resource: { buffer: gpu_buffers.pressure_accelerations } },
-                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
-                { binding: 5, resource: { buffer: gpu_buffers.pressures } },
-                { binding: 9, resource: { buffer: particle_neighbors_buffer } }, 
-            ]
-        }),
         calculatePressureAccelerations_settings_bind_group: device.createBindGroup({
             layout: pipelines.pressureAccelerations.getBindGroupLayout(1),
             entries: [
                 { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
-        calculateViscosityAccelerations_bind_group: device.createBindGroup({
-            layout: pipelines.viscosityAccelerations.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: { buffer: gpu_buffers.positions } }, 
-                { binding: 1, resource: { buffer: gpu_buffers.velocities } }, 
-                { binding: 3, resource: { buffer: gpu_buffers.viscosity_accelerations } },
-                { binding: 4, resource: { buffer: gpu_buffers.densities } }, 
-                { binding: 9, resource: { buffer: particle_neighbors_buffer } }, 
-            ]
-        }),
         calculateViscosityAccelerations_settings_bind_group: device.createBindGroup({
             layout: pipelines.viscosityAccelerations.getBindGroupLayout(1),
             entries: [
                 { binding: 0, resource: { buffer: uniform_buffer } },
-            ]
-        }),
-        calculatePositionCorrections: device.createBindGroup({
-            layout: pipelines.calculatePositionCorrections.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: { buffer: gpu_buffers.positions } }, 
-                { binding: 9, resource: { buffer: particle_neighbors_buffer } }, 
-                { binding: 11, resource: { buffer: gpu_buffers.position_corrections } }, 
             ]
         }),
         calculatePositionCorrections_settings_bind_group: device.createBindGroup({

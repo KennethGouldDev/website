@@ -136,6 +136,24 @@ body{
     padding: 0px;
 }
 
+.journal-entry.journal-warning {
+    border: 2px dashed rgba(122, 40, 40, 0.4);
+    width: 80%;
+    margin-left: auto;
+    margin-right: auto;
+}
+.journal-entry.journal-warning .journal-header{
+    border: 1px double rgba(210, 175, 175, 0.599);
+    font-size: clamp(1rem, 3vw, 2.5rem);
+    opacity: 90%;
+}
+.journal-entry.journal-warning .journal-date{
+    font-size: 0;
+}
+.journal-entry.journal-warning .journal-character-count{
+    font-size: 0;
+}
+
 span.quiet{
     font-size: 1.2rem;
     color: gray
