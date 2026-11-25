@@ -17,6 +17,80 @@ body{
     z-index: -1;
 }
 
+.first-time-warning{
+    background-color: rgba(0, 0, 0, 0.7);
+    position: fixed;
+    z-index: 9999;
+
+    /* inset is shorthand for setting all of top, right, bottom, and left*/
+    inset: 0;
+    color: white;
+    font-family: "Jersey15";
+    padding: 20px;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+
+    /* animation */
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 1.5s cubic-bezier(0.22, 1, 0.36, 1), visibility 1.5s ease;
+}
+/* hide it if it is acknowledged */
+.first-time-warning.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+.first-time-warning-content{
+    width: 85%;
+    max-width: 1200px;
+    padding: 20px;
+    background-color: rgb(2, 2, 4);
+    border: 5px solid rgb(150, 30, 30);
+    box-shadow: 0px 0px 5px black;
+
+    /* animation */
+    transform: scale(1) translateY(0);
+    transition: transform 1.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* if it isnt hidden, then set the scale 1. this will make it scale up */
+.first-time-warning.hidden .first-time-warning-content{
+    transform: scale(0.9) translateY(20px);
+}
+.first-time-warning-content h1{
+    font-size: clamp(1.8rem, 4vw, 3rem);
+    font-family:"GeistPixel";
+    background-color: black;
+    padding: 10px;
+    margin: 5px;
+    margin-bottom: 30px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+}
+.first-time-warning-content p{
+    font-size: clamp(1.2rem, 3vw, 2rem);
+    margin: 10px;
+}
+.first-time-warning-content button{
+    cursor:pointer;
+    width: 90%;
+    padding: 12px;
+    font-size: clamp(1.1rem, 3vw, 2rem);
+    font-family:"GeistPixel";
+    margin-bottom: 10px;
+    margin-top: 20px;
+    background-color: rgba(255, 255, 255, 0.914);
+}
+.first-time-warning-content small{
+    padding: 0;
+    margin: 0;
+    margin-top: 100px;
+    font-size: clamp(0.8rem, 2vw, 1.2rem);
+    opacity: 0.5;
+}
+
 #nameplate{
     height: 80px;
 
@@ -111,6 +185,7 @@ body{
     /* Comment the below two lines to stop the delay of when it comes in*/
     opacity: 0;
     animation: fadeInLayout 0.7s ease-out 2s forwards;
+    pointer-events: none;
 }
 /* make it one column if small width window */
 @media (max-width: 800px){
@@ -388,11 +463,13 @@ span.bigger{
     from{
         transform: translateY(10px);
         opacity: 0;
+        pointer-events: none;
     }
 
     to {
         transform: translateY(0);
         opacity: 1;
+        pointer-events: auto;
     }
 }
 

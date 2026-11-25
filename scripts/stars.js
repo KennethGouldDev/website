@@ -83,7 +83,6 @@ function animate(timestamp){
         if (physics_accumulate > physics_delta * 10){
             // dont make it execute more than ten times in one frame
             physics_accumulate = physics_delta * 10
-            break
         }
         physics_accumulate -= physics_delta
         physics_process(physics_delta, time)

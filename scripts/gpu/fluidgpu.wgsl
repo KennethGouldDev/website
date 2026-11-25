@@ -59,6 +59,21 @@ var<storage, read_write> particle_slots : array<u32>;
 @group(0) @binding(11)
 var<storage, read_write> position_corrections : array<vec2<f32>>;
 
+@group(0) @binding(12)
+var<storage, read> rectangles : array<Rectangle>;
+
+struct Rectangle {
+    x : f32,
+    y : f32,
+    width : f32,
+    height : f32,
+    velocity_x : f32,
+    velocity_y : f32,
+    color_r : f32,
+    color_g : f32,
+    color_b : f32,
+    selected : u32, // this will be 0 or 1
+}
 
 // vertex shaders can only *read* storage buffers. So we make another binding for purely reading
 @group(2) @binding(0)
@@ -129,12 +144,8 @@ struct SimulationSettings {
     resize_scale_x : f32,
     resize_scale_y : f32,
 
-}
+    rectangle_count : u32
 
-@group(1) @binding(1) var <uniform> objects: Object;
-
-struct Object {
-    x : f32
 }
 
 @compute @workgroup_size(64)
@@ -531,34 +542,36 @@ fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
     positions[i].x *= settings.resize_scale_x;
     positions[i].y *= settings.resize_scale_y;
 
+    collide_with_rectangles(i);
+
     // collide with borders
     // bottom
     if (positions[i].y + settings.particle_radius > settings.canvas_height){
-        velocities[i].x *= settings.border_damping;
+        velocities[i].y = -abs(velocities[i].y);
         velocities[i].y *= settings.border_damping;
-        velocities[i].y *= -1;
-        positions[i].y = settings.canvas_height - settings.particle_radius - 1;
+        velocities[i].x *= settings.border_damping;
+        positions[i].y = settings.canvas_height - settings.particle_radius;
     }
-        // left
+    // left
     if (positions[i].x - settings.particle_radius < 0){
+        velocities[i].x = abs(velocities[i].x);
         velocities[i].x *= settings.border_damping;
         velocities[i].y *= settings.border_damping;
-        velocities[i].x *= -1;
-        positions[i].x = settings.particle_radius + 1;
+        positions[i].x = settings.particle_radius;
     }
     // right
     if (positions[i].x + settings.particle_radius > settings.canvas_width){
+        velocities[i].x = -abs(velocities[i].x);
         velocities[i].x *= settings.border_damping;
         velocities[i].y *= settings.border_damping;
-        velocities[i].x *= -1;
-        positions[i].x = settings.canvas_width - settings.particle_radius - 1;
+        positions[i].x = settings.canvas_width - settings.particle_radius;
     }
     // top
     if (positions[i].y - settings.particle_radius < 0){
-        velocities[i].x *= settings.border_damping;
+        velocities[i].y = abs(velocities[i].y);
         velocities[i].y *= settings.border_damping;
-        velocities[i].y *= -1;
-        positions[i].y = settings.particle_radius + 1;
+        velocities[i].x *= settings.border_damping;
+        positions[i].y = settings.particle_radius;
     }
 }
 
@@ -661,6 +674,70 @@ struct VertexOutput {
     @location(1) color: vec4<f32>,
 }
 
+
+@vertex
+fn vertex_rectangle(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(instance_index) instance_index: u32
+) -> RectangleVertexOutput {
+    let rect = rectangles[instance_index];
+
+    // make the two triangles that form a square
+    let corners = array<vec2<f32>, 6>(
+        // top left
+        vec2<f32>(0, 0), vec2<f32>(1,0), vec2<f32>(0, 1),
+        // bottom right
+        vec2<f32>(1, 0), vec2<f32>(1, 1), vec2<f32>(0, 1)
+    );
+    // now we use these coords to form the rectangle
+    let canvas_pos = vec2f(rect.x, rect.y) + (corners[vertex_index] * vec2f(rect.width, rect.height));
+    let clip_pos = canvas_position_to_clip_position(canvas_pos);
+
+    var color = vec3f(rect.color_r, rect.color_g, rect.color_b);
+
+    if (rect.selected == 1u){
+        // if it's selected, make it lighter
+        color = mix(color, vec3f(1,1,1), 0.4);
+    }
+
+    var output : RectangleVertexOutput;
+    output.position = vec4<f32>(clip_pos.x, clip_pos.y, 0, 1);
+    output.color = color;
+    let size = vec2f(rect.width, rect.height);
+    output.local_position = corners[vertex_index] * size;
+    output.size = size;
+    return output;
+}
+
+@fragment
+fn fragment_rectangle(input : RectangleVertexOutput) -> @location(0) vec4<f32>{
+    // border
+    let border_width = 5.0;
+
+    // distance from this pixel to the four edges
+    let to_left = input.local_position.x;
+    let to_top = input.local_position.y;
+    let to_right = input.size.x - input.local_position.x;
+    let to_bottom = input.size.y - input.local_position.y;
+
+    let closest_edge_distance = min(min(to_left, to_top), min(to_right, to_bottom));
+
+    if (closest_edge_distance < border_width){
+        return vec4<f32>(input.color * 0.5, 1.0);
+    }
+    
+    return vec4<f32>(input.color, 1.0);
+}
+
+struct RectangleVertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color : vec3<f32>,
+    // These two variables are so that we can add a border to the rectangles
+    // it works similarly to what was done in the particle vertex and fragment shaders
+    @location(1) local_position : vec2<f32>,
+    @location(2) size : vec2<f32>,
+}
+
 fn canvas_position_to_clip_position(canvas_position : vec2<f32>) -> vec2<f32> {
     // we need to convert this canvas coordinate into a clip space coordinate
     // basically convert it into being normalized from -1 to 1
@@ -670,6 +747,104 @@ fn canvas_position_to_clip_position(canvas_position : vec2<f32>) -> vec2<f32> {
     ret.y *= -1.0;
     // clip space is y up
     return ret;
+}
+
+
+
+fn collide_with_rectangles(i : u32){
+    // loop through all rectangles
+    for (var r = 0u; r < settings.rectangle_count; r++){
+        let rect = rectangles[r];
+        let rect_top_left = vec2f(rect.x, rect.y);
+        let rect_bottom_right = vec2f(rect.x + rect.width, rect.y + rect.height);
+        
+        let position = positions[i];
+
+        // theres some cool math that lets you figure out if a circle is inside of a rectangle
+        // first we get the point of the rectangle that the particle is closest to
+        // we can do this with, suprise, the clamping function!
+        // this is genius man i cant believe i just found out about this
+        let closest = clamp(position, rect_top_left, rect_bottom_right);
+        let to_position = position - closest;
+        // dot can be used as shorthand to get magnitude squared
+        // its function is literally the left hand side of the pythagorean theorem
+        let distance_squared = dot(to_position, to_position);
+
+        // to check if the particle is touching, we just have to see if the particle is atleast closer than
+        // the radius of the particle
+        let radius = settings.particle_radius;
+        if (distance_squared >= radius * radius) { continue; }
+
+        // Not only do we have to calculate what direction to push the particle in,
+        // In order to properly bounce the velocity, we have to calculate the surface normal!! yippee!!
+        var normal = vec2f(0,0);
+
+        if (distance_squared > 0){
+            // this is what will normally happen, the center of the circle is OUTSIDE of the box
+            // (but the circle touches it)
+            let distance = sqrt(distance_squared);
+            normal = to_position / distance;
+            // move until we are properly one radius away from the survice
+            positions[i] = closest + normal * radius;
+        } else {
+            // the particle is actually INSIDE of the box. this means we have to
+            // find the nearest edge and then leave through that
+
+            // find the distance the particle is from each edge
+            let to_left = position.x - rect_top_left.x;
+            let to_right = rect_bottom_right.x - position.x;
+            let to_top = position.y - rect_top_left.y;
+            let to_bottom = rect_bottom_right.y - position.y;
+            // figure out which one the particle is closest to
+            // literally just a huge min function
+            let nearest = min(min(to_left, to_right), min(to_top, to_bottom));
+
+            // now just a bunch of comparisons to see which one is the actual nearest
+            // set the normal based on that,
+            // and push the particle out based on that
+            if (nearest == to_left){
+                normal = vec2f(-1, 0);
+                positions[i].x = rect_top_left.x - radius;
+            } else if (nearest == to_right){
+                normal = vec2f(1, 0);
+                positions[i].x = rect_bottom_right.x + radius;
+            } else if (nearest == to_top){
+                normal = vec2f(0, -1);
+                positions[i].y = rect_top_left.y - radius;
+            } else if (nearest == to_bottom){
+                normal = vec2f(0, 1);
+                positions[i].y = rect_bottom_right.y + radius;
+            }
+        }
+        // if the position is outside of bounds,
+
+        // now we have to bounce the velocity!
+        // that beautiful dot product is back at it again to make sure that
+        // the particle is actually traveling INTO the box, and we arent reflecting
+        // it even though the particle is moving away from it.
+        // if it is negative, we are going INTO it.
+
+        // we also have to apply the velocity of the rectangle itself to the particle
+        // this is so when we move the rectangle around its like actually moving the particles
+        // with it!
+        // to do this we can actually very simply pass the velocity of the particle
+        // relative to the rectangle. this makes it so that if the particle is stationary
+        // and the rectangle is moving toward it, it acts as if the particle is moving
+        // toward the rectangle. From there you can also imagine how other cases would work.
+        // relativity is awesome!
+        let rect_velocity = vec2f(rect.velocity_x, rect.velocity_y);
+        let relative_velocity = velocities[i] - rect_velocity;
+        let moving_toward = dot(relative_velocity, normal);
+        if (moving_toward < 0){
+            // doing some stuff here
+            // subtracting from the velocity to slow it down/reflect it
+            // multiplying by normal to make sure its only affecting the proper axis
+            // multiplying by moving_toward so that the more *direct* the particle is moving
+            // toward the edge, the more of an affect it will have
+            // finally multiplying by the border damping constant
+            velocities[i] -= normal * moving_toward * (1.0 + settings.border_damping);
+        }
+    }
 }
 
 

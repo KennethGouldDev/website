@@ -13,6 +13,7 @@
  <script src="scripts/stars.js" defer></script>
  <script src="scripts/nameplate.js" defer></script>
  <script type="module" src="scripts/thoughts.js" defer></script>
+ <script type="module" src="scripts/first-time-warning.js" defer></script>
  
  <!-- cool custom starry background -->
  <canvas id="background"></canvas>
@@ -20,8 +21,45 @@
  <!-- button to hide the info so you can see the background -->
  <script src="scripts/hide-button.js" defer></script>
  <button id="hide-button">hide ui<br>v</button>
- <div id="ui">
+ <!-- warning -->
+  <div id="first-time-warning" class="first-time-warning hidden">
  
+     <div class="first-time-warning-content">
+ 
+         <h1>hey welcome! just a heads up:</h1>
+ 
+         <p>
+             this website is meant to be a sort of personal space of mine 
+             where I can share my projects, interests, thoughts, and experiences.
+         </p>
+         <p>
+             Some of the content talks about topics that may be sensitive to some people.
+         </p>
+         <p>
+             there is also some cursing, look away if you're my family or my employer lol.
+         </p>
+         <p>
+             You'll run into some very informal writing, personal journal entries, and occassionally
+             unfiltered thoughts possibly written during difficult moments in my life.
+         </p>
+         <p>
+             keep in mind while you explore, that this is not a polished representation of who I am.<br>
+         </p>
+ 
+         <button id="first-time-warning-acknowledge-button">
+             ah okay I understand. Let me in!
+         </button>
+         <br>
+         <small> 
+             don't worry, you wont see this warning again on this browser
+         </small>
+         
+     </div>
+ 
+  </div>
+
+
+ <div id="ui">
  
  <!-- top bar display -->
  <header id="nameplate">
@@ -72,8 +110,7 @@
             <ul>- home page background customization</ul>
             <ul>- journal page background customization</ul>
             <ul>- projects page background customization</ul>
-            <ul>- links page</ul>
-            <ul>- figure out links page simulation</ul>
+            <ul>- links page sorting algorithm simulation</ul>
             <ul>- more journals!</ul>
 
         </nav>

@@ -1,5 +1,48 @@
 <!-- thought -->
 
+2026-11-24
+oh man. looks like i lost my mind a bit this morning. <br>
+This has inspired me to make a warning message for people who are new to the website! pretty cool!!
+
+
+<!-- thought -->
+
+2026-11-24
+OXYMORON. the word OXYMORON is itself an OXYMORON!! The prefic OXY originates from a greek word meaning sharp/smart. The word moron is yknow. an oxymoron is a contradiction, and the word itself follows its own definition. a word that follows its own definition is known as being AUTOLOGICAL. it possesses the quality that it describes. FUCK FUCK FHUCK FUCK
+
+
+<!-- thought -->
+
+2026-11-24
+but i've never treated myself with this much love in my life
+
+
+<!-- thought -->
+
+2026-11-24
+GOING CRAZY
+
+
+<!-- thought -->
+
+2026-11-24
+BETTER THAN EVER!!!
+
+
+<!-- thought -->
+
+2026-11-24
+feels great being so creative though
+
+
+<!-- thought -->
+
+2026-11-24
+right now It feels like my mind is kind of more restless than ever.. like I'm constantly thinking of something new or I have a song stuck in my head or im thinking of a conversation I had or a plethora of things. like i can tune out the world but trying to tune into it it just feels so hard because my mind is so restless idk
+
+
+<!-- thought -->
+
 2026-11-23
 We are the universe becoming conscious of itself
 

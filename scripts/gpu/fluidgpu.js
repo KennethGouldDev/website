@@ -8,28 +8,128 @@ const background_canvas = document.getElementById("background");
 /** @type {GPUCanvasContext} */
 const webgpu_context = background_canvas.getContext("webgpu")
 
-// this gets initialized with the gpu
-let gpu_canvas_format
-// this get initialized with the pipelines
-let gpu_render_pipeline
+// ------------------------------------------------- MOVING RECTANGLES
 
 // track mouse
-let mouse = {
-    x: 0,
-    y: 0
+let mouse = { x: 0, y: 0 }
+let clicking = false
+
+// settings
+const handle_size = 8
+const minimum_rectangle_size = 20
+let current_target = null;
+let dragging = true;
+let last_mouse_down_pos
+let last_target_starting_rect
+let dragging_side
+
+let resizing_left = false
+let resizing_top = false
+let resizing_right = false
+let resizing_bottom = false
+
+function get_rectangle_target(x, y){
+    // loop through all the rectangles
+    // loop backwards so that the rectangle on top wins
+    for (let i = rectangles.length - 1; i >= 0; i--){
+        const r = rectangles[i]
+        // outside of the rectangle? skip
+        // here we are including the handle margins so that
+        // we can still select the rectangle to resize it
+        if (x < r.x - handle_size || x > r.x + r.width + handle_size ||
+            y < r.y - handle_size || y > r.y + r.height + handle_size) { continue }
+        return r
+    }
+    return null
 }
+
+function rectangle_apply_bounds(rectangle){
+    // make sure rectangle is within bounds
+    if (rectangle.x < 0) { rectangle.x = 0}
+    if (rectangle.y < 0) { rectangle.y = 0}
+    if (rectangle.x + rectangle.width > background_canvas.width) 
+        { rectangle.x = background_canvas.width - rectangle.width}
+    if (rectangle.y + rectangle.height > background_canvas.height) 
+        { rectangle.y = background_canvas.height - rectangle.height}
+    // make sure min width and height are correct
+    rectangle.width = Math.max(rectangle.width, minimum_rectangle_size)
+    rectangle.height = Math.max(rectangle.height, minimum_rectangle_size)
+}
+
 window.addEventListener("mousemove", (event) => {
     mouse.x = event.clientX;
     mouse.y = event.clientY;
-})
 
-// get if the mouse is clicked
-let clicking = false
+    if (current_target == null) { return; }
+    if (dragging){
+        // drag rectangle around
+        current_target.x = last_target_starting_rect.x + (mouse.x - last_mouse_down_pos.x)
+        current_target.y = last_target_starting_rect.y + (mouse.y - last_mouse_down_pos.y)
+    }
+    else {
+        let mx = Math.max(0, Math.min(background_canvas.width, mouse.x))
+        let my = Math.max(0, Math.min(background_canvas.height, mouse.y))
+        // resize borders
+        if (resizing_left){
+            current_target.x = mx
+            // make sure this doesnt make the rectangle actually move the bottom right corner
+            current_target.x = Math.min(current_target.x, 
+                (last_target_starting_rect.x + last_target_starting_rect.width) 
+                - minimum_rectangle_size)
+            current_target.width = last_target_starting_rect.width + (last_mouse_down_pos.x - mx)
+        }
+        if (resizing_top){
+            current_target.y = my
+            // make sure this doesnt make the rectangle actually move the bottom right corner
+            current_target.y = Math.min(current_target.y, 
+                (last_target_starting_rect.y + last_target_starting_rect.height) 
+                - minimum_rectangle_size)
+            current_target.height = last_target_starting_rect.height + (last_mouse_down_pos.y - my)
+        }
+        if (resizing_right){
+            current_target.x = last_target_starting_rect.x
+            current_target.width = last_target_starting_rect.width - (last_mouse_down_pos.x - mx)
+        }
+        if (resizing_bottom){
+            current_target.y = last_target_starting_rect.y
+            current_target.height = last_target_starting_rect.height - (last_mouse_down_pos.y - my)
+        }
+    }
+
+    rectangle_apply_bounds(current_target)
+})
 
 document.addEventListener("mousedown", () =>{
-    clicking = true
+    last_mouse_down_pos = {x: mouse.x, y: mouse.y}
+    // whatever rectangle we clicked, select it
+    let target = get_rectangle_target(mouse.x, mouse.y)
+    if (target == null) { 
+        // didnt click a rectangle
+        clicking = true
+        return; 
+    }
+    last_target_starting_rect = {x: target.x, y: target.y, width: target.width, height: target.height}
+    current_target = target
+
+    // get if we want to drag this or resize this
+
+    // check and see if we clicked on any of the borders of the rectangle
+    resizing_left = mouse.x >= target.x - handle_size && mouse.x <= target.x + handle_size
+    resizing_top = mouse.y >= target.y - handle_size && mouse.y <= target.y + handle_size
+    resizing_right = mouse.x >= target.x + target.width - handle_size && mouse.x <= target.x + target.width + handle_size
+    resizing_bottom = mouse.y >= target.y + target.height - handle_size && mouse.y <= target.y + target.height + handle_size
+
+    // if any of them are true, we are resizing
+    if (resizing_left || resizing_top || resizing_right || resizing_bottom){
+        dragging = false
+    }
+    else{
+        // otherwise, we are dragging
+        dragging = true
+    }
 })
 document.addEventListener("mouseup", () =>{
+    current_target = null
     clicking = false
 })
 
@@ -39,27 +139,29 @@ document.addEventListener("mouseup", () =>{
 // These we will instead put into a uniform buffer
 
 let gravity = 1000
-let target_density = 0.003
+let target_density = 0.01
 let border_damping = 0.95
 let air_damping = 0.994
-let physics_max_steps_per_frame = 40;
+let physics_max_steps_per_frame = 50;
 let physics_delta_time = 1.0/960.0;
 
-let pressure_coefficient = 2500000
-let viscosity_coefficient = 5000
+let simulation_speed = 1;
 
-let density_influence_radius = 10
-let pressure_influence_radius = 6
+let pressure_coefficient = 2000000
+let viscosity_coefficient = 3000
+
+let density_influence_radius = 15
+let pressure_influence_radius = 8
 let viscosity_influence_radius = 10
 
 let particle_radius = 3.5
 let particle_mass = 1
 let particle_min_distance = 3
 
-let particle_amount = 20000
+let particle_amount = 10000
 
 let mouse_influence_radius = 150
-let mouse_strength = 100
+let mouse_strength = 80
 
 let color_mode = 0;
 let color_sensitivity = 1;
@@ -68,7 +170,7 @@ let color_sensitivity = 1;
 
 
 let spawn_random_variance = 5
-let spawn_position_variance = 2
+let spawn_position_variance = 3
 
 // these are things that can change per particle.
 // We will put these in their own buffers
@@ -80,16 +182,30 @@ let pressure_accelerations = []
 let viscosity_accelerations = []
 
 
+const max_rectangles = 64
+// stride in CS usually refers to offsets in memory
+// very basically this is how many values im gonna have for each rectangle
+// in the rectangles buffer
+const rectangle_stride = 10
+let rectangle_count = 0
+let rectangles = [
+    {x: 300, y: 400, width: 200, height: 100, color: [0.1, 0.3, 0.9], selected: false},
+    {x: 200, y: 800, width: 50, height: 150, color: [0.1, 0.3, 0.9], selected: false}
+]
+
+
 // GPU!!!
 // ----------------------------------------------- INITIALIZE
 
+// this gets initialized with the gpu
+let gpu_canvas_format
 await initialize_gpu()
 
 let prev_window_width = -1
 let prev_window_height = -1
 let resize_scale_x = 1
 let resize_scale_y = 1
-
+let canvas_initialized = false;
 update_canvas()
 
 // create particle data
@@ -119,6 +235,9 @@ let pipelines = {
     integration: null
 }
 
+// this get initialized with the pipelines
+let gpu_render_pipeline
+let gpu_rectangle_pipeline
 initialize_pipelines()
 
 let bind_groups = initialize_bind_groups()
@@ -142,9 +261,11 @@ function animate(timestamp){
     // requestAnimationFrame doesnt give deltatime, instead it gives a timestamp.
     // with this, we can calculate deltatime though.
     // NOTE timestamp is in milliseconds, thats why we divide by 1000 here
-    let delta = (timestamp - prev_timestamp) / 1000;
+    let delta = (timestamp - prev_timestamp) / 1000 * simulation_speed;
     prev_timestamp = timestamp
-    let time = timestamp/1000;
+    let time = timestamp/1000; 
+
+    update_rectangles_buffer(delta)
 
     // do physics process
     // some trickery to make sure it runs at a fixed timestep
@@ -184,6 +305,16 @@ function render_gpu(){
         }]
     })
 
+    // do rectangles
+    if (rectangles.length > 0){
+        render_pass.setPipeline(gpu_rectangle_pipeline)
+        render_pass.setBindGroup(0, bind_groups.rectangle_bind_group)
+        render_pass.setBindGroup(1, bind_groups.rectangle_settings_bind_group)
+        // 6 vertices per rectangle, one instance per rectangle
+        render_pass.draw(6, Math.min(rectangles.length, max_rectangles))
+    }
+
+    // do particles
     render_pass.setPipeline(gpu_render_pipeline)
     render_pass.setBindGroup(2, bind_groups.vertex_bind_group)
     render_pass.setBindGroup(1, bind_groups.render_settings_bind_group)
@@ -482,6 +613,26 @@ function update_canvas(){
     resize_scale_y = size.y / background_canvas.height
     background_canvas.width = size.x;
     background_canvas.height = size.y;
+
+    if (canvas_initialized == false){
+        resize_scale_x = 1
+        resize_scale_y = 1
+        canvas_initialized = true
+        return
+    }
+    // resize rectangles
+    for (const r of rectangles){
+        r.x *= resize_scale_x
+        r.width *= resize_scale_x
+        r.y *= resize_scale_y
+        r.height *= resize_scale_y
+        // to not run into velocity problems
+        if (r.prev_x != undefined){
+            r.prev_x *= resize_scale_x
+            r.prev_y *= resize_scale_y
+        }
+        rectangle_apply_bounds(r)
+    }
 }
 
 function get_canvas_size(){
@@ -600,7 +751,9 @@ function initialize_buffers_with_data(){
         pressures: create_storage_buffer(pressure_data),
         // * 2 because two floats per particle (vec2)
         // this will automatically make it all zeroes
-        position_corrections: create_storage_buffer(new Float32Array(particle_amount * 2))
+        position_corrections: create_storage_buffer(new Float32Array(particle_amount * 2)),
+        // rectangle_stride as many 32 bit values per rectangle
+        rectangles: create_storage_buffer(new Float32Array(max_rectangles * rectangle_stride)),
     }
 
     // create the readback buffers!
@@ -685,6 +838,8 @@ function update_uniform_buffer(){
     uniform_floats[27] = resize_scale_x
     uniform_floats[28] = resize_scale_y
 
+    uniform_uints[29] = rectangle_count
+
     // write to the uniform buffer
     device.queue.writeBuffer(
         uniform_buffer, 0,
@@ -695,6 +850,62 @@ function update_uniform_buffer(){
     // for one physics step
     resize_scale_x = 1
     resize_scale_y = 1
+}
+
+// make an array to put the rectangle data in.
+// we make it out here instead of in the function so that a bunch of arrays arent made every frame,
+// instead we just update this one
+let rectangle_array_buffer = new ArrayBuffer(max_rectangles * rectangle_stride * 4)
+const rectangle_floats = new Float32Array(rectangle_array_buffer)
+const rectangle_uints = new Uint32Array(rectangle_array_buffer)
+function update_rectangles_buffer(delta){
+    // update rectangle count
+    rectangle_count = Math.min(rectangles.length, max_rectangles)
+
+    // cap out deta so that we dont accidentally divide by a huge amount
+    // and get really huge vellocity value
+    const dt = Math.max(delta, 1/60)
+
+    // update the data array
+    for (let i = 0; i < rectangle_count; i++){
+        const r = rectangles[i]
+
+        // figure out velocity
+        // if this is the first time we are seeing this rectangle,
+        // it hasnt moved so its stuff is undefined
+        if (r.prev_x == undefined){
+            r.prev_x = r.x
+            r.prev_y = r.y
+        }
+        // velocity is distance over time gang!
+        const vx = (r.x - r.prev_x) / dt
+        const vy = (r.y - r.prev_y) / dt
+        r.prev_x = r.x
+        r.prev_y = r.y
+
+        // color
+        let color = r.color
+        if (color == undefined){
+            // do a default if no color specified
+            color = [0.1, 0.3, 0.9]
+        }
+
+        const o = i * rectangle_stride
+        rectangle_floats[o + 0] = r.x
+        rectangle_floats[o + 1] = r.y
+        rectangle_floats[o + 2] = r.width
+        rectangle_floats[o + 3] = r.height
+        rectangle_floats[o + 4] = vx
+        rectangle_floats[o + 5] = vy
+        rectangle_floats[o + 6] = color[0]
+        rectangle_floats[o + 7] = color[1]
+        rectangle_floats[o + 8] = color[2]
+        // r.selected is gonna be a boolean in the javascript world
+        // so this quick ternary operator converts the boolean into a 0 or 1
+        rectangle_uints[o + 9] = r.selected ? 1 : 0
+    }
+    // update the buffer
+    device.queue.writeBuffer(gpu_buffers.rectangles, 0, rectangle_array_buffer)
 }
 
 
@@ -906,6 +1117,19 @@ function initialize_pipelines(){
             topology: "triangle-list"
         }
     })
+    gpu_rectangle_pipeline = device.createRenderPipeline({
+        layout: "auto",
+        vertex: { 
+            module: shader_module,
+            entryPoint: "vertex_rectangle"
+        },
+        fragment: {
+            module: shader_module,
+            entryPoint: "fragment_rectangle",
+            targets: [{ format: gpu_canvas_format }]
+        },
+        primitive: { topology: "triangle-list"}
+    })
 }
 
 // bind groups basically connect the pipelines to actual gpu buffers
@@ -989,6 +1213,7 @@ function initialize_bind_groups(){
                 { binding: 2, resource: { buffer: gpu_buffers.pressure_accelerations } },
                 { binding: 3, resource: { buffer: gpu_buffers.viscosity_accelerations } },
                 { binding: 11, resource: { buffer: gpu_buffers.position_corrections } },
+                { binding: 12, resource: { buffer: gpu_buffers.rectangles } },
             ]
         }),
         integrate_settings_bind_group: device.createBindGroup({
@@ -1009,13 +1234,24 @@ function initialize_bind_groups(){
                 { binding: 4, resource: { buffer: gpu_buffers.densities } },
             ]
         }),
-
         render_settings_bind_group: device.createBindGroup({
             layout: gpu_render_pipeline.getBindGroupLayout(1),
             entries: [
                 { binding: 0, resource: { buffer: uniform_buffer } },
             ]
         }),
+        rectangle_bind_group: device.createBindGroup({
+            layout: gpu_rectangle_pipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 12, resource: { buffer: gpu_buffers.rectangles } }
+            ]
+        }),
+        rectangle_settings_bind_group: device.createBindGroup({
+            layout: gpu_rectangle_pipeline.getBindGroupLayout(1),
+            entries: [
+                { binding: 0, resource: { buffer: uniform_buffer } }
+            ]
+        })
     }
 }
 
