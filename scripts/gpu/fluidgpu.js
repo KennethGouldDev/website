@@ -139,7 +139,7 @@ document.addEventListener("mouseup", () =>{
 // These we will instead put into a uniform buffer
 
 let gravity = 1000
-let target_density = 0.01
+let target_density = 0.007
 let border_damping = 0.95
 let air_damping = 0.994
 let physics_max_steps_per_frame = 50;
@@ -147,21 +147,21 @@ let physics_delta_time = 1.0/960.0;
 
 let simulation_speed = 1;
 
-let pressure_coefficient = 2000000
+let pressure_coefficient = 10000000
 let viscosity_coefficient = 3000
 
-let density_influence_radius = 15
-let pressure_influence_radius = 8
-let viscosity_influence_radius = 10
+let density_influence_radius = 20
+let pressure_influence_radius = 20
+let viscosity_influence_radius = 20
 
-let particle_radius = 3.5
+let particle_radius = 5
 let particle_mass = 1
 let particle_min_distance = 3
 
-let particle_amount = 10000
+let particle_amount = 20000
 
-let mouse_influence_radius = 150
-let mouse_strength = 80
+let mouse_influence_radius = 200
+let mouse_strength = 100
 
 let color_mode = 0;
 let color_sensitivity = 1;
@@ -169,8 +169,8 @@ let color_sensitivity = 1;
 // 1 = density
 
 
-let spawn_random_variance = 5
-let spawn_position_variance = 3
+let spawn_random_variance = 2
+let spawn_position_variance = 8
 
 // these are things that can change per particle.
 // We will put these in their own buffers
@@ -864,7 +864,7 @@ function update_rectangles_buffer(delta){
 
     // cap out deta so that we dont accidentally divide by a huge amount
     // and get really huge vellocity value
-    const dt = Math.max(delta, 1/60)
+    const dt = Math.max(delta, 1/30)
 
     // update the data array
     for (let i = 0; i < rectangle_count; i++){
