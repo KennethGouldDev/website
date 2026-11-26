@@ -1,5 +1,11 @@
 <!-- thought -->
 
+2026-11-26
+happy thanksgiving!! thankful for YOU :)
+
+
+<!-- thought -->
+
 2026-11-25
 nothing else ever compares to the experience of this present moment
 
