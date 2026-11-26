@@ -17,4 +17,8 @@ setTimeout(() => {
         warning.classList.remove("hidden");
     }
 }, 2500)
-
+// disable the button and enable it after enough time
+acknowledge_button.disabled = true
+setTimeout(() => {
+    acknowledge_button.disabled = false
+}, 5000)

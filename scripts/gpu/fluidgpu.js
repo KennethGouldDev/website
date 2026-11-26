@@ -99,7 +99,13 @@ window.addEventListener("mousemove", (event) => {
     rectangle_apply_bounds(current_target)
 })
 
-document.addEventListener("mousedown", () =>{
+document.addEventListener("mousedown", (event) =>{
+    // make sure if we click down we arent clicking a
+    // control panel element
+    // event.target gets the element that was last click
+    // and checks if it has the id "controls"
+    if (event.target.closest("#controls")) { return }
+
     last_mouse_down_pos = {x: mouse.x, y: mouse.y}
     // whatever rectangle we clicked, select it
     let target = get_rectangle_target(mouse.x, mouse.y)
@@ -139,29 +145,30 @@ document.addEventListener("mouseup", () =>{
 // These we will instead put into a uniform buffer
 
 let gravity = 1000
-let target_density = 0.007
+let target_density = 0.025
 let border_damping = 0.95
-let air_damping = 0.994
+let air_damping = 0.996
 let physics_max_steps_per_frame = 50;
 let physics_delta_time = 1.0/960.0;
 
 let simulation_speed = 1;
 
-let pressure_coefficient = 10000000
-let viscosity_coefficient = 3000
+let pressure_coefficient = 7000000
+let viscosity_coefficient = 5000
 
-let density_influence_radius = 20
-let pressure_influence_radius = 20
-let viscosity_influence_radius = 20
+let density_influence_radius = 12
+let pressure_influence_radius = 12
+let viscosity_influence_radius = 12
 
-let particle_radius = 5
+let particle_radius = 3
 let particle_mass = 1
 let particle_min_distance = 3
 
-let particle_amount = 20000
+const maximum_particles = 100000
+let particle_amount = 10000
 
-let mouse_influence_radius = 200
-let mouse_strength = 100
+let mouse_influence_radius = 150
+let mouse_strength = 70
 
 let color_mode = 0;
 let color_sensitivity = 1;
@@ -170,7 +177,7 @@ let color_sensitivity = 1;
 
 
 let spawn_random_variance = 2
-let spawn_position_variance = 8
+let spawn_position_variance = 5
 
 // these are things that can change per particle.
 // We will put these in their own buffers
@@ -242,13 +249,62 @@ initialize_pipelines()
 
 let bind_groups = initialize_bind_groups()
 
-// ------------------------------------------------------ READBACK
+// ------------------------------------------------------ SLIDERS
 
-// copy_gpu_data_to_readback()
-// let data = await get_gpu_particle_data()
-// // feed it back into the variables
-// apply_gpu_particle_data(data)
-// console.log(data.particle_amount)
+function create_slider(label, min, max, step, initial, on_change){
+    // each slider is gonna have its own row
+    const row = document.createElement("div")
+    row.className = "controls_slider_row"
+
+    const top = document.createElement("div")
+    top.className = "controls_top"
+    const name_text = document.createElement("span")
+    name_text.textContent = label
+    const value_text = document.createElement("span")
+    top.append(name_text, value_text)
+
+    const slider = document.createElement("input")
+    slider.type = "range"
+    slider.min = min
+    slider.max = max
+    slider.step = step
+    slider.value = initial
+
+    slider.addEventListener("input", () => {
+        // to precision chops off any far trailing decimals
+        value_text.textContent = Number(slider.valueAsNumber.toPrecision(4))
+        // execute the on change function
+        on_change(slider.valueAsNumber)
+    })
+    value_text.textContent = Number(slider.valueAsNumber.toPrecision(4))
+    row.append(top, slider)
+    document.getElementById("controls").append(row)
+}
+
+// the last parameter, on_change, is a function that can be given to the create_slider function.
+// its an arrow function, for example: 
+// "v => gravity = v"
+// is shorthand for:
+// function (v) { gravity = v; }
+create_slider("Gravity", -2000, 2000, 10, gravity, v => gravity = v)
+create_slider("Target Density", 0, 0.05, 0.001, target_density, v => target_density = v)
+create_slider("Pressure", 300000, 20000000, 100000, pressure_coefficient, v => pressure_coefficient = v)
+create_slider("Viscosity", 0, 20000, 100, viscosity_coefficient, v => viscosity_coefficient = v)
+create_slider("Border Damping", 0, 1, 0.01, border_damping, v => border_damping = v)
+create_slider("Air Damping", 0.9, 1, 0.001, air_damping, v => air_damping = v)
+create_slider("Particle Radius", 1, 8, 0.5, particle_radius, v => particle_radius = v)
+create_slider("Mouse Radius", 20, 400, 10, mouse_influence_radius, v => mouse_influence_radius = v)
+create_slider("Mouse Strength", 20, 150, 5, mouse_strength, v => mouse_strength = v)
+create_slider("Simulation Speed", 0, 2, 0.1, simulation_speed, v => simulation_speed = v)
+create_slider("Color Sensitivity", 0, 3, 0.1, color_sensitivity, v => color_sensitivity = v)
+// this one has the greatest opportunity to lag everything out lol
+create_slider("Influence Radius", 5, 30, 1, density_influence_radius, v => {
+    density_influence_radius = v
+    pressure_influence_radius = v
+    viscosity_influence_radius = v
+})
+create_slider("Physics Deltatime", 1/960, 1/120, 1/960, physics_delta_time, v => physics_delta_time = v)
+create_slider("Particle Amount", 100, maximum_particles, 100, particle_amount, v => set_particle_amount(v))
 
 // ------------------------------------------------------ RENDER
 
@@ -417,7 +473,7 @@ function physics_process(delta, time){
 
 function create_particle_data(){
     let root = Math.ceil(Math.sqrt(particle_amount))
-    for (let i = 0; i < particle_amount; i++){
+    for (let i = 0; i < maximum_particles; i++){
         // spawn them in a grid formation
 
         let pos_x = background_canvas.width/2
@@ -444,6 +500,52 @@ function create_particle_data(){
     }
 }
 
+function set_particle_amount(new_amount){
+    new_amount = Math.min(Math.floor(new_amount), maximum_particles)
+
+    // we have added particles!
+    if (new_amount > particle_amount){
+        const count = new_amount - particle_amount
+        // two floats (vec2) for each new particle
+        const fresh_positions = new Float32Array(count * 2)
+        for (let i = 0; i < count; i++){
+            // rain them in from the top of the canvas
+            // set x
+            
+            // randomly spawn on a random border
+            const gap = 50
+            let rand = Math.random()
+            if (rand < 0.25){
+                // top
+                fresh_positions[i*2] = randf_range(0, background_canvas.width)
+                fresh_positions[i*2 + 1] = randf_range(0, gap)
+            }
+            else if (rand < 0.5){
+                // right
+                fresh_positions[i*2] = randf_range(background_canvas.width - gap, background_canvas.width)
+                fresh_positions[i*2 + 1] = randf_range(0, background_canvas.height)
+            }
+            else if (rand < 0.75){
+                // bottom
+                fresh_positions[i*2] = randf_range(0, background_canvas.width)
+                fresh_positions[i*2 + 1] = randf_range(background_canvas.height - gap, background_canvas.height)
+            }
+            else{
+                // left
+                fresh_positions[i*2] = randf_range(0, gap)
+                fresh_positions[i*2 + 1] = randf_range(0, background_canvas.height)
+            }
+        }
+        // each particle has a vec2f, 2 floats, 4 bytes per float = 8 bytes per particle
+        // this is where we can actually use the offset argument!
+        // write at where the new positions are going to be for the new particles
+        device.queue.writeBuffer(gpu_buffers.positions, particle_amount * 8, fresh_positions)
+        // set the velocities of the new particles to 0
+        device.queue.writeBuffer(gpu_buffers.velocities, particle_amount * 8, new Float32Array(count * 2))
+    }
+    particle_amount = new_amount
+}
+
 var instantiateGrid_bind_group
 var doGrid_bind_group
 var doGridStarts_bind_group
@@ -460,28 +562,28 @@ var grid_nested_length = 100 // this is unused but to remove it would mean
 // shifting the whole uniform buffer down which ahhhhh whatever
 function handle_grid(){
     // we need to do a lot to change the grid information.
-    // first of all, only do all this is the grid actually changed.
     let new_grid_cell_size = Math.max(density_influence_radius, pressure_influence_radius, viscosity_influence_radius)
     let new_grid_length_x = Math.ceil(background_canvas.width/new_grid_cell_size)
     let new_grid_length_y = Math.ceil(background_canvas.height/new_grid_cell_size)
-
+    
     // we only make the particle slots and grid cell indices buffer once
     // because their size never changes, it's dependent on the particle size.
     // make them if they dont exist
     if (!grid_cell_indices_buffer){
         grid_cell_indices_buffer = device.createBuffer({
-            size: particle_amount * 4,
+            size: maximum_particles * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         })
     }
     if (!particle_slots_buffer){
         particle_slots_buffer = device.createBuffer({
-            size: particle_amount * 4,
+            size: maximum_particles * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         })
     }
-
-
+    
+    
+    // first of all, only do most of the stuff if the grid actually changed.
     if (grid_cell_size != new_grid_cell_size || 
         grid_length_x != new_grid_length_x ||
         grid_length_y != new_grid_length_y)
@@ -751,7 +853,7 @@ function initialize_buffers_with_data(){
         pressures: create_storage_buffer(pressure_data),
         // * 2 because two floats per particle (vec2)
         // this will automatically make it all zeroes
-        position_corrections: create_storage_buffer(new Float32Array(particle_amount * 2)),
+        position_corrections: create_storage_buffer(new Float32Array(maximum_particles * 2)),
         // rectangle_stride as many 32 bit values per rectangle
         rectangles: create_storage_buffer(new Float32Array(max_rectangles * rectangle_stride)),
     }
@@ -771,8 +873,7 @@ function initialize_buffers_with_data(){
 function initialize_uniform_buffer(){
     uniform_buffer = device.createBuffer({
         // its important to determine the write size of
-        // our uniform buffer. We use 64 bytes here because
-        // we have around 50 bytes worth of variables
+        // our uniform buffer to be able to fit everything.
     size: 128,
     usage: 
         GPUBufferUsage.UNIFORM |
@@ -862,9 +963,12 @@ function update_rectangles_buffer(delta){
     // update rectangle count
     rectangle_count = Math.min(rectangles.length, max_rectangles)
 
-    // cap out deta so that we dont accidentally divide by a huge amount
+    // cap out delta so that we dont accidentally divide by a huge amount
     // and get really huge vellocity value
-    const dt = Math.max(delta, 1/30)
+    // this is absurdly low because i kind of want
+    // to limit how much velocity rectangles can
+    // exert on particles
+    const dt = Math.max(delta, 1/240)
 
     // update the data array
     for (let i = 0; i < rectangle_count; i++){

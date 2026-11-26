@@ -13,3 +13,26 @@ body{
 
     z-index: -1;
 }
+
+#controls {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    width: 300px;
+    padding: 10px;
+    background: rgba(10, 10, 10, 0.6);
+    color: white;
+    font-family: "Jersey15";
+    border-radius: 4px;
+    font-size: 1.8rem;
+}
+.controls_slider_row{
+    margin-bottom: 10px;
+}
+.controls_top{ 
+    display: flex; 
+    justify-content: space-between;
+}
+.controls_slider_row input {
+    width: 100%;
+}

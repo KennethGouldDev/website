@@ -397,6 +397,7 @@ fn calculateViscosityAccelerations( @builtin(global_invocation_id) id: vec3<u32>
                 let to_neighbor = positions[neighbor_i] - positions[particle_i];
                 let magnitude = distance(vec2f(0,0), to_neighbor);
                 // skip if on top or too far
+
                 if (magnitude == 0 || magnitude >= settings.viscosity_influence_radius) { continue; }
                 // viscosity scalar
                 let laplacian = SPHlaplacian(magnitude, settings.viscosity_influence_radius);
@@ -542,37 +543,64 @@ fn integrate( @builtin(global_invocation_id) id: vec3<u32>){
     positions[i].x *= settings.resize_scale_x;
     positions[i].y *= settings.resize_scale_y;
 
-    collide_with_rectangles(i);
+    // do this multiple times just in case
+    for (var j = 0u; j < 4u; j++){
+        collide_with_rectangles(i);
+        collide_with_borders(i);
+    }
 
-    // collide with borders
-    // bottom
-    if (positions[i].y + settings.particle_radius > settings.canvas_height){
-        velocities[i].y = -abs(velocities[i].y);
-        velocities[i].y *= settings.border_damping;
-        velocities[i].x *= settings.border_damping;
-        positions[i].y = settings.canvas_height - settings.particle_radius;
+    // we collided with the rectangles and borders, and STILL
+    // we could be stuck. Lets check
+    if (get_if_particle_can_be_there(positions[i]) == false) { 
+        // we are stuck
+        // now, all because of you, we have to do some expensive
+        // calculations to teleport you out of there
+        
+        // loop through all the rectangles,
+        // try to see if we can escape through any of their sides
+        // the nearest side that we can escape through is our best choice!
+        let r = settings.particle_radius;
+        let p = positions[i];
+        // by default lets just say the best position to teleport to
+        // is this particles position
+        var best = p;
+        // say the best distance so far is just a huge number
+        // wow! float scientific notation works here!
+        var best_distance = 1e30;
+
+        var found = false;
+
+        for (var j = 0u; j < settings.rectangle_count; j++){
+            let rect = rectangles[j];
+            // make a list of all the possible teleport positions to loop through
+            var candidates = array<vec2f, 4>(
+                vec2f(rect.x - r, p.y), // left
+                vec2(p.x, rect.y - r), // top
+                vec2f(rect.x + rect.width + r, p.y), // right
+                vec2(p.x, rect.y + rect.height + r) // bottom
+            );
+            for (var k = 0u; k < 4u; k++){
+                let candidate = candidates[k];
+                // make sure we can actually go here
+                if (get_if_particle_can_be_there(candidate) == false)
+                    { continue; }
+                let d = distance(p, candidate);
+                if (d < best_distance){
+                    best_distance = d;
+                    best = candidate;
+                    found = true;
+                }
+            }
+        }
+
+        if (found){
+            positions[i] = best;
+            // lose some velocity so that it doesn't
+            // shoot out as much
+            velocities[i] *= 0.5;
+        }
     }
-    // left
-    if (positions[i].x - settings.particle_radius < 0){
-        velocities[i].x = abs(velocities[i].x);
-        velocities[i].x *= settings.border_damping;
-        velocities[i].y *= settings.border_damping;
-        positions[i].x = settings.particle_radius;
-    }
-    // right
-    if (positions[i].x + settings.particle_radius > settings.canvas_width){
-        velocities[i].x = -abs(velocities[i].x);
-        velocities[i].x *= settings.border_damping;
-        velocities[i].y *= settings.border_damping;
-        positions[i].x = settings.canvas_width - settings.particle_radius;
-    }
-    // top
-    if (positions[i].y - settings.particle_radius < 0){
-        velocities[i].y = abs(velocities[i].y);
-        velocities[i].y *= settings.border_damping;
-        velocities[i].x *= settings.border_damping;
-        positions[i].y = settings.particle_radius;
-    }
+    
 }
 
 
@@ -733,7 +761,7 @@ struct RectangleVertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color : vec3<f32>,
     // These two variables are so that we can add a border to the rectangles
-    // it works similarly to what was done in the particle vertex and fragment shaders
+    // it works simhelping people, and undilarly to what was done in the particle vertex and fragment shaders
     @location(1) local_position : vec2<f32>,
     @location(2) size : vec2<f32>,
 }
@@ -749,7 +777,46 @@ fn canvas_position_to_clip_position(canvas_position : vec2<f32>) -> vec2<f32> {
     return ret;
 }
 
+fn get_if_particle_can_be_there(p : vec2f) -> bool{
+    let r = settings.particle_radius;
+    // we add/subtract an epsilon here so that particles that get teleported
+    // to be a radius away arent still invalid
+    let epsilon = 0.01;
+    // check if past borders
+    if (p.x < r - epsilon || p.x > settings.canvas_width - r + epsilon ||
+        p.y < r - epsilon || p.y > settings.canvas_height - r + epsilon){
+        return false;
+    }
+    // check if in a rectangle
+    for (var i = 0u; i < settings.rectangle_count; i++){
+        if (particle_overlaps_rectangle(p, rectangles[i])) 
+            { return false; }
+    }
+    // not in a rectangle or past border
+    return true;
+}
 
+fn particle_overlaps_rectangle(position : vec2f, rect : Rectangle) -> bool {
+    // theres some cool math that lets you figure out if a circle is inside of a rectangle
+    // first we get the point of the rectangle that the particle is closest to
+    // we can do this with, suprise, the clamping function!
+    // this is genius man i cant believe i just found out about this
+    let closest = clamp(position, 
+        vec2f(rect.x, rect.y), 
+        vec2f(rect.x + rect.width, rect.y + rect.height));
+    let to_position = position - closest;
+    // dot can be used as shorthand to get magnitude squared
+    // its function is literally the left hand side of the pythagorean theorem
+    let distance_squared = dot(to_position, to_position);
+
+    // to check if the particle is touching, we just have to see if the particle is atleast closer than
+    // the radius of the particle
+    // subtracting an epsilon here so that particle that get pushed out to be a radius
+    // away dont still count as being stuck
+    let radius = settings.particle_radius - 0.1;
+    if (distance_squared >= radius * radius) { return false; }
+    return true;
+}
 
 fn collide_with_rectangles(i : u32){
     // loop through all rectangles
@@ -760,24 +827,17 @@ fn collide_with_rectangles(i : u32){
         
         let position = positions[i];
 
-        // theres some cool math that lets you figure out if a circle is inside of a rectangle
-        // first we get the point of the rectangle that the particle is closest to
-        // we can do this with, suprise, the clamping function!
-        // this is genius man i cant believe i just found out about this
         let closest = clamp(position, rect_top_left, rect_bottom_right);
         let to_position = position - closest;
-        // dot can be used as shorthand to get magnitude squared
-        // its function is literally the left hand side of the pythagorean theorem
         let distance_squared = dot(to_position, to_position);
 
-        // to check if the particle is touching, we just have to see if the particle is atleast closer than
-        // the radius of the particle
-        let radius = settings.particle_radius;
-        if (distance_squared >= radius * radius) { continue; }
-
+        let radius = settings.particle_radius - 0.01;
+        
         // Not only do we have to calculate what direction to push the particle in,
         // In order to properly bounce the velocity, we have to calculate the surface normal!! yippee!!
         var normal = vec2f(0,0);
+
+        if (distance_squared >= radius * radius) { continue; }
 
         if (distance_squared > 0){
             // this is what will normally happen, the center of the circle is OUTSIDE of the box
@@ -847,6 +907,36 @@ fn collide_with_rectangles(i : u32){
     }
 }
 
+fn collide_with_borders(i : u32){
+    // bottom
+    if (positions[i].y + settings.particle_radius > settings.canvas_height){
+        velocities[i].y = -abs(velocities[i].y);
+        velocities[i].y *= settings.border_damping;
+        velocities[i].x *= settings.border_damping;
+        positions[i].y = settings.canvas_height - settings.particle_radius;
+    }
+    // left
+    if (positions[i].x - settings.particle_radius < 0){
+        velocities[i].x = abs(velocities[i].x);
+        velocities[i].x *= settings.border_damping;
+        velocities[i].y *= settings.border_damping;
+        positions[i].x = settings.particle_radius;
+    }
+    // right
+    if (positions[i].x + settings.particle_radius > settings.canvas_width){
+        velocities[i].x = -abs(velocities[i].x);
+        velocities[i].x *= settings.border_damping;
+        velocities[i].y *= settings.border_damping;
+        positions[i].x = settings.canvas_width - settings.particle_radius;
+    }
+    // top
+    if (positions[i].y - settings.particle_radius < 0){
+        velocities[i].y = abs(velocities[i].y);
+        velocities[i].y *= settings.border_damping;
+        velocities[i].x *= settings.border_damping;
+        positions[i].y = settings.particle_radius;
+    }
+}
 
 // grid functions
 

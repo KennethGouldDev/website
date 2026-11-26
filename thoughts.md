@@ -1,5 +1,17 @@
 <!-- thought -->
 
+2026-11-25
+nothing ever compares to the experience of this present moment
+
+
+<!-- thought -->
+
+2026-11-25
+my brain feels like it's melting out of my ears. this vessel gets so tired, but i push through it anyway. pushing through should make me grow strong
+
+
+<!-- thought -->
+
 2026-11-24
 oh man. looks like i lost my mind a bit this morning. <br>
 This has inspired me to make a warning message for people who are new to the website! pretty cool!!
