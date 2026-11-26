@@ -387,6 +387,7 @@ function render_gpu(){
 // PHYSICS PROCESS
 
 function physics_process(delta, time){
+    // change particle amount
     handle_canvas_changing()
     handle_grid()
     // update settings

@@ -1,7 +1,7 @@
 <!-- thought -->
 
 2026-11-25
-nothing ever compares to the experience of this present moment
+nothing else ever compares to the experience of this present moment
 
 
 <!-- thought -->
