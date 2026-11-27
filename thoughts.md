@@ -1,6 +1,12 @@
 <!-- thought -->
 
 2026-11-26
+SHOUT OUT to HUNTER RHEE on YOUTUBE
+
+
+<!-- thought -->
+
+2026-11-26
 happy thanksgiving!! thankful for YOU :)
 
 
