@@ -1,7 +1,7 @@
 <!-- thought -->
 
 2026-11-26
-SHOUT OUT to HUNTER RHEE on YOUTUBE
+SHOUT OUT to [HUNTER RHEE on YOUTUBE](https://www.youtube.com/@hunterrhee)
 
 
 <!-- thought -->
