@@ -176,7 +176,7 @@ span.quiet{
 @keyframes journalReveal{
     from{
         opacity: 0;
-        transform: translateY(20px) scale(0.9);
+        transform: translateY(30px) scale(0.8);
     }
     to{
         opacity: 1;

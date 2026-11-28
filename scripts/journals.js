@@ -195,17 +195,17 @@ journals.forEach(journal =>{
 // you can not only get the element, you can get the index of the element as shown here
 const initialDelay = 800;
 let staggerDelay = 600;
-let staggerDelayMultiplier = 0.92
+let staggerDelayMultiplier = 0.95
 
 journals.forEach((journal, index) => {
     // settimeout very simply executes a function after a set amount of time
     setTimeout(() => {
-        journal.style.animation = "journalReveal 2s ease-out forwards"
+        journal.style.animation = "journalReveal 1.5s ease-out forwards"
         // make it clickable
         journal.classList.add("clickable")
     },
     // delay is in milliseconds
-    initialDelay + staggerDelay * (index + 1) * Math.pow(staggerDelayMultiplier, index)
+    initialDelay + staggerDelay * (index + 1) * Math.max(0.2,Math.pow(staggerDelayMultiplier, index))
     )
     // make the next journal take less time to appear
 })
