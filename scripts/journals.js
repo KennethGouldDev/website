@@ -7,6 +7,10 @@ import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/+esm";
 // get the journal container
 const journalContainer = document.querySelector(".journals")
 
+marked.setOptions({
+    breaks: true
+})
+
 async function loadJournals(){
     
     // what we have to do is get the list of journal entry paths from

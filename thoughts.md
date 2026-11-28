@@ -1,5 +1,17 @@
 <!-- thought -->
 
+2026-11-27
+he who lives by the applause will die by the critique
+
+
+<!-- thought -->
+
+2026-11-27
+they mix together like bleach and ammonia
+
+
+<!-- thought -->
+
 2026-11-26
 SHOUT OUT to [HUNTER RHEE on YOUTUBE](https://www.youtube.com/@hunterrhee)
 

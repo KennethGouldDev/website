@@ -108,13 +108,14 @@ body{
     font-size: clamp(1.5rem, 3vw, 2.2rem);
     background-color: rgba(0,0,0,.8);
     color: rgb(220, 220, 220);
-    line-height: 1.1;
+    line-height: 1.2;
+    border: 1px double rgba(255, 255, 255, 0.1);
 }
 .journal-content p{
     margin: 0;
     padding: 15px;
-    border: 1px double rgba(255, 255, 255, 0.1);
 }
+
 .journal-content img{
     display: block;
     width: auto;
